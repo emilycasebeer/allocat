@@ -1,0 +1,106 @@
+### Test API Endpoints for Allocat Budgeting App
+
+# Replace YOUR_AUTH_TOKEN with actual JWT token from Supabase Auth
+# Replace BASE_URL with your local development URL (e.g., http://localhost:3000)
+
+### 1. Create Account
+POST {{BASE_URL}}/api/accounts
+Authorization: Bearer YOUR_AUTH_TOKEN
+Content-Type: application/json
+
+{
+  "name": "Main Checking",
+  "type": "checking",
+  "balance": 2500.00
+}
+
+### 2. List Accounts
+GET {{BASE_URL}}/api/accounts
+Authorization: Bearer YOUR_AUTH_TOKEN
+
+### 3. Create Category
+POST {{BASE_URL}}/api/categories
+Authorization: Bearer YOUR_AUTH_TOKEN
+Content-Type: application/json
+
+{
+  "name": "Groceries",
+  "group_name": "Monthly Bills"
+}
+
+### 4. List Categories
+GET {{BASE_URL}}/api/categories
+Authorization: Bearer YOUR_AUTH_TOKEN
+
+### 5. Create Monthly Budget
+POST {{BASE_URL}}/api/budgets
+Authorization: Bearer YOUR_AUTH_TOKEN
+Content-Type: application/json
+
+{
+  "month": 12,
+  "year": 2024,
+  "to_be_budgeted": 5000.00
+}
+
+### 6. Get Budget Summary
+GET {{BASE_URL}}/api/budgets?month=12&year=2024
+Authorization: Bearer YOUR_AUTH_TOKEN
+
+### 7. Allocate Funds to Category
+POST {{BASE_URL}}/api/budgets/allocate
+Authorization: Bearer YOUR_AUTH_TOKEN
+Content-Type: application/json
+
+{
+  "budget_id": "BUDGET_UUID_HERE",
+  "category_id": "CATEGORY_UUID_HERE",
+  "amount": 500.00
+}
+
+### 8. Create Transaction (Income)
+POST {{BASE_URL}}/api/transactions
+Authorization: Bearer YOUR_AUTH_TOKEN
+Content-Type: application/json
+
+{
+  "account_id": "ACCOUNT_UUID_HERE",
+  "amount": 3000.00,
+  "date": "2024-12-15",
+  "description": "Salary",
+  "type": "income"
+}
+
+### 9. Create Transaction (Expense)
+POST {{BASE_URL}}/api/transactions
+Authorization: Bearer YOUR_AUTH_TOKEN
+Content-Type: application/json
+
+{
+  "account_id": "ACCOUNT_UUID_HERE",
+  "category_id": "CATEGORY_UUID_HERE",
+  "amount": -75.50,
+  "date": "2024-12-15",
+  "description": "Grocery shopping",
+  "type": "expense"
+}
+
+### 10. List Transactions
+GET {{BASE_URL}}/api/transactions
+Authorization: Bearer YOUR_AUTH_TOKEN
+
+### 11. Get Spending Report
+GET {{BASE_URL}}/api/reports/spending?start_date=2024-12-01&end_date=2024-12-31&group_by=category
+Authorization: Bearer YOUR_AUTH_TOKEN
+
+### 12. Get Net Worth Report
+GET {{BASE_URL}}/api/reports/net-worth
+Authorization: Bearer YOUR_AUTH_TOKEN
+
+### Notes:
+# - Replace YOUR_AUTH_TOKEN with actual JWT token
+# - Replace BASE_URL with your local development URL
+# - Replace UUID placeholders with actual IDs from previous responses
+# - All amounts are in decimal format (e.g., 1000.00)
+# - Dates should be in ISO format (YYYY-MM-DD)
+# - Negative amounts represent expenses, positive amounts represent income
