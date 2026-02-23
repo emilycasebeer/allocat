@@ -5,9 +5,12 @@ import { supabase } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus } from 'lucide-react'
+import { Plus, Target, Pencil, Trash2, ArrowLeftRight, Copy } from 'lucide-react'
 import { AddCategoryModal } from '@/app/dashboard/add-category-modal'
+import { SetGoalModal } from '@/app/dashboard/set-goal-modal'
+import { MoveMoneyModal } from '@/app/dashboard/move-money-modal'
 import type { Category } from '@/app/dashboard/dashboard'
+import type { CategoryGoal } from '@/lib/budgeting'
 
 interface BudgetCategory {
     id: string
@@ -16,9 +19,10 @@ interface BudgetCategory {
     budgeted_amount: number
     activity_amount: number
     available_amount: number
+    goal: CategoryGoal | null
 }
 
-interface BudgetSummary {
+export interface BudgetSummary {
     id: string
     month: number
     year: number
@@ -33,12 +37,52 @@ interface BudgetViewProps {
     onCategoryAdded: () => void
 }
 
+function GoalProgress({ goal, available }: { goal: CategoryGoal; available: number }) {
+    let target: number | null = null
+    let label = ''
+
+    if (goal.goal_type === 'monthly_savings' || goal.goal_type === 'monthly_spending') {
+        target = goal.monthly_amount
+        label = goal.goal_type === 'monthly_savings' ? 'Monthly Savings' : 'Monthly Budget'
+    } else if (goal.goal_type === 'target_balance' || goal.goal_type === 'debt_payoff') {
+        target = goal.target_amount
+        label = goal.goal_type === 'debt_payoff' ? 'Debt Payoff' : 'Target Balance'
+    } else if (goal.goal_type === 'target_balance_by_date') {
+        target = goal.target_amount
+        label = goal.target_date ? `Goal by ${goal.target_date}` : 'Target Balance'
+    }
+
+    if (!target || target <= 0) return null
+
+    const pct = Math.min(100, Math.max(0, (available / target) * 100))
+    const isComplete = pct >= 100
+
+    return (
+        <div className="mt-1">
+            <div className="flex items-center justify-between text-xs text-gray-500 mb-0.5">
+                <span>{label}</span>
+                <span>{Math.round(pct)}%</span>
+            </div>
+            <div className="h-1 w-full bg-gray-200 rounded-full overflow-hidden">
+                <div
+                    className={`h-full rounded-full transition-all ${isComplete ? 'bg-green-500' : 'bg-blue-400'}`}
+                    style={{ width: `${pct}%` }}
+                />
+            </div>
+        </div>
+    )
+}
+
 export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
     const [budgetSummary, setBudgetSummary] = useState<BudgetSummary | null>(null)
     const [loading, setLoading] = useState(true)
     const [editingCell, setEditingCell] = useState<string | null>(null)
     const [editingValue, setEditingValue] = useState('')
     const [showAddCategory, setShowAddCategory] = useState(false)
+    const [goalModal, setGoalModal] = useState<{ categoryId: string; categoryName: string; goal: CategoryGoal | null } | null>(null)
+    const [renamingCategory, setRenamingCategory] = useState<{ id: string; name: string } | null>(null)
+    const [showMoveMoney, setShowMoveMoney] = useState(false)
+    const [copyingLastMonth, setCopyingLastMonth] = useState(false)
 
     useEffect(() => {
         fetchBudgetSummary()
@@ -51,14 +95,12 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
             if (!session) return
 
             const headers = { 'Authorization': `Bearer ${session.access_token}` }
-
             const response = await fetch(`/api/budgets?month=${month}&year=${year}`, { headers })
 
             if (response.ok) {
                 const { budget } = await response.json()
                 setBudgetSummary(budget)
             } else if (response.status === 404) {
-                // No budget for this month yet — create one
                 const createResponse = await fetch('/api/budgets', {
                     method: 'POST',
                     headers: { ...headers, 'Content-Type': 'application/json' },
@@ -83,26 +125,16 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
 
     const handleBudgetSave = async (categoryId: string) => {
         if (!budgetSummary) return
-
         try {
             const { data: { session } } = await supabase.auth.getSession()
             if (!session) return
 
             const newAmount = parseFloat(editingValue) || 0
-
             const response = await fetch('/api/budgets/allocate', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`
-                },
-                body: JSON.stringify({
-                    budget_id: budgetSummary.id,
-                    category_id: categoryId,
-                    amount: newAmount
-                })
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+                body: JSON.stringify({ budget_id: budgetSummary.id, category_id: categoryId, amount: newAmount })
             })
-
             if (response.ok) {
                 const { budget } = await response.json()
                 setBudgetSummary(budget)
@@ -115,9 +147,80 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
         }
     }
 
+    const handleCopyLastMonth = async () => {
+        if (!budgetSummary) return
+        setCopyingLastMonth(true)
+        try {
+            const { data: { session } } = await supabase.auth.getSession()
+            if (!session) return
+            const response = await fetch('/api/budgets/copy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+                body: JSON.stringify({ to_budget_id: budgetSummary.id })
+            })
+            if (response.ok) {
+                const { budget } = await response.json()
+                setBudgetSummary(budget)
+            } else {
+                const err = await response.json()
+                alert(`Error: ${err.error}`)
+            }
+        } catch (error) {
+            console.error('Error copying last month:', error)
+        } finally {
+            setCopyingLastMonth(false)
+        }
+    }
+
     const handleKeyDown = (e: React.KeyboardEvent, categoryId: string) => {
         if (e.key === 'Enter') handleBudgetSave(categoryId)
         else if (e.key === 'Escape') { setEditingCell(null); setEditingValue('') }
+    }
+
+    const handleRenameSave = async (categoryId: string, newName: string) => {
+        const trimmed = newName.trim()
+        if (!trimmed) { setRenamingCategory(null); return }
+        try {
+            const { data: { session } } = await supabase.auth.getSession()
+            if (!session) return
+            const response = await fetch(`/api/categories/${categoryId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+                body: JSON.stringify({ name: trimmed })
+            })
+            if (response.ok) {
+                onCategoryAdded() // refresh dashboard categories
+                fetchBudgetSummary()
+            } else {
+                const err = await response.json()
+                alert(`Error: ${err.error}`)
+            }
+        } catch (error) {
+            console.error('Error renaming category:', error)
+        } finally {
+            setRenamingCategory(null)
+        }
+    }
+
+    const handleDeleteCategory = async (category: BudgetCategory) => {
+        if (!confirm(`Delete "${category.name}"? This cannot be undone. Existing transactions will become uncategorized.`)) return
+        try {
+            const { data: { session } } = await supabase.auth.getSession()
+            if (!session) return
+            const response = await fetch(`/api/categories/${category.id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${session.access_token}` }
+            })
+            if (response.ok) {
+                onCategoryAdded()
+                fetchBudgetSummary()
+            } else {
+                const err = await response.json()
+                alert(`Error: ${err.error}`)
+            }
+        } catch (error) {
+            console.error('Error deleting category:', error)
+        }
     }
 
     const getAvailableClass = (available: number) => {
@@ -147,7 +250,6 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
     const totalActivity = budgetSummary.categories.reduce((sum, cat) => sum + cat.activity_amount, 0)
     const totalAvailable = budgetSummary.categories.reduce((sum, cat) => sum + cat.available_amount, 0)
 
-    // Group categories by group_name
     const grouped = budgetSummary.categories.reduce((groups, cat) => {
         if (!groups[cat.group_name]) groups[cat.group_name] = []
         groups[cat.group_name].push(cat)
@@ -173,10 +275,20 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
                 <CardHeader>
                     <div className="flex items-center justify-between">
                         <CardTitle>Budget Categories</CardTitle>
-                        <Button onClick={() => setShowAddCategory(true)} size="sm">
-                            <Plus className="h-4 w-4 mr-2" />
-                            Add Category
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            <Button variant="outline" size="sm" onClick={() => setShowMoveMoney(true)}>
+                                <ArrowLeftRight className="h-4 w-4 mr-1" />
+                                Move Money
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={handleCopyLastMonth} disabled={copyingLastMonth}>
+                                <Copy className="h-4 w-4 mr-1" />
+                                {copyingLastMonth ? 'Copying...' : 'Copy Last Month'}
+                            </Button>
+                            <Button onClick={() => setShowAddCategory(true)} size="sm">
+                                <Plus className="h-4 w-4 mr-2" />
+                                Add Category
+                            </Button>
+                        </div>
                     </div>
                 </CardHeader>
                 <CardContent>
@@ -188,17 +300,42 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
                                     <th className="w-1/6 text-right">Budgeted</th>
                                     <th className="w-1/6 text-right">Activity</th>
                                     <th className="w-1/6 text-right">Available</th>
+                                    <th className="w-20"></th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {Object.entries(grouped).map(([groupName, groupCategories]) => (
                                     <React.Fragment key={groupName}>
                                         <tr className="category-group">
-                                            <td colSpan={4} className="font-semibold">{groupName}</td>
+                                            <td colSpan={5} className="font-semibold">{groupName}</td>
                                         </tr>
                                         {groupCategories.map((category) => (
-                                            <tr key={category.id}>
-                                                <td className="category-name">{category.name}</td>
+                                            <tr key={category.id} className="group">
+                                                <td className="category-name">
+                                                    {renamingCategory?.id === category.id ? (
+                                                        <Input
+                                                            value={renamingCategory.name}
+                                                            onChange={(e) => setRenamingCategory({ id: category.id, name: e.target.value })}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') handleRenameSave(category.id, renamingCategory.name)
+                                                                if (e.key === 'Escape') setRenamingCategory(null)
+                                                            }}
+                                                            onBlur={() => handleRenameSave(category.id, renamingCategory.name)}
+                                                            className="h-7 text-sm py-0"
+                                                            autoFocus
+                                                        />
+                                                    ) : (
+                                                        <div>
+                                                            {category.name}
+                                                            {category.goal && (
+                                                                <GoalProgress
+                                                                    goal={category.goal}
+                                                                    available={category.available_amount}
+                                                                />
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </td>
                                                 <td className="text-right">
                                                     {editingCell === category.id ? (
                                                         <Input
@@ -225,6 +362,31 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
                                                 <td className={`text-right ${getAvailableClass(category.available_amount)}`}>
                                                     ${category.available_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </td>
+                                                <td className="text-center">
+                                                    <div className="flex items-center justify-center gap-1">
+                                                        <button
+                                                            title="Set Goal"
+                                                            className={`p-1 rounded hover:bg-gray-100 ${category.goal ? 'text-blue-500' : 'text-gray-300'}`}
+                                                            onClick={() => setGoalModal({ categoryId: category.id, categoryName: category.name, goal: category.goal })}
+                                                        >
+                                                            <Target className="h-4 w-4" />
+                                                        </button>
+                                                        <button
+                                                            title="Rename"
+                                                            className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                            onClick={() => setRenamingCategory({ id: category.id, name: category.name })}
+                                                        >
+                                                            <Pencil className="h-3.5 w-3.5" />
+                                                        </button>
+                                                        <button
+                                                            title="Delete"
+                                                            className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                            onClick={() => handleDeleteCategory(category)}
+                                                        >
+                                                            <Trash2 className="h-3.5 w-3.5" />
+                                                        </button>
+                                                    </div>
+                                                </td>
                                             </tr>
                                         ))}
                                     </React.Fragment>
@@ -238,6 +400,7 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
                                     <td className={`text-right ${getAvailableClass(totalAvailable)}`}>
                                         ${totalAvailable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </td>
+                                    <td></td>
                                 </tr>
                             </tbody>
                         </table>
@@ -254,6 +417,29 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
                     fetchBudgetSummary()
                 }}
             />
+
+            {showMoveMoney && budgetSummary && (
+                <MoveMoneyModal
+                    open={showMoveMoney}
+                    onOpenChange={setShowMoveMoney}
+                    budgetSummary={budgetSummary}
+                    onMoved={fetchBudgetSummary}
+                />
+            )}
+
+            {goalModal && (
+                <SetGoalModal
+                    open={!!goalModal}
+                    onOpenChange={(open) => { if (!open) setGoalModal(null) }}
+                    categoryId={goalModal.categoryId}
+                    categoryName={goalModal.categoryName}
+                    existingGoal={goalModal.goal}
+                    onSaved={() => {
+                        setGoalModal(null)
+                        fetchBudgetSummary()
+                    }}
+                />
+            )}
         </div>
     )
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,7 +20,28 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select'
+import { Plus, Trash2, Split } from 'lucide-react'
 import type { Account, Category } from '@/app/dashboard/dashboard'
+
+export interface EditingTransaction {
+    id: string
+    account_id: string
+    category_id: string | null
+    payee_name: string | null
+    amount: number
+    date: string
+    memo: string | null
+    type: 'income' | 'expense' | 'transfer'
+    cleared: 'uncleared' | 'cleared' | 'reconciled'
+    is_split?: boolean
+    splits?: { id: string; category_id: string | null; amount: number; memo: string | null }[]
+}
+
+interface SplitRow {
+    category_id: string
+    amount: string
+    memo: string
+}
 
 interface AddTransactionModalProps {
     open: boolean
@@ -28,6 +49,7 @@ interface AddTransactionModalProps {
     account: Account
     categories: Category[]
     onTransactionAdded: () => void
+    editing?: EditingTransaction | null
     currentMonth?: number
     currentYear?: number
 }
@@ -38,20 +60,111 @@ export function AddTransactionModal({
     account,
     categories,
     onTransactionAdded,
+    editing,
 }: AddTransactionModalProps) {
     const [memo, setMemo] = useState('')
     const [amount, setAmount] = useState('')
     const [date, setDate] = useState(new Date().toISOString().split('T')[0])
     const [categoryId, setCategoryId] = useState<string>('')
     const [type, setType] = useState<'income' | 'expense' | 'transfer'>('expense')
+    const [payeeName, setPayeeName] = useState('')
+    const [payees, setPayees] = useState<{ id: string; name: string; default_category_id: string | null }[]>([])
     const [loading, setLoading] = useState(false)
+    const [splitMode, setSplitMode] = useState(false)
+    const [splitRows, setSplitRows] = useState<SplitRow[]>([
+        { category_id: '', amount: '', memo: '' },
+        { category_id: '', amount: '', memo: '' },
+    ])
+
+    // Pre-fill form when editing an existing transaction
+    useEffect(() => {
+        if (!open) return
+        if (editing) {
+            setType(editing.type)
+            setAmount(Math.abs(editing.amount).toString())
+            setDate(editing.date)
+            setMemo(editing.memo ?? '')
+            setPayeeName(editing.payee_name ?? '')
+            if (editing.is_split && editing.splits && editing.splits.length > 0) {
+                setSplitMode(true)
+                setSplitRows(editing.splits.map(s => ({
+                    category_id: s.category_id ?? '',
+                    amount: Math.abs(s.amount).toString(),
+                    memo: s.memo ?? '',
+                })))
+                setCategoryId('')
+            } else {
+                setSplitMode(false)
+                setCategoryId(editing.category_id ?? '')
+                setSplitRows([{ category_id: '', amount: '', memo: '' }, { category_id: '', amount: '', memo: '' }])
+            }
+        } else {
+            setMemo('')
+            setAmount('')
+            setDate(new Date().toISOString().split('T')[0])
+            setCategoryId('')
+            setType('expense')
+            setPayeeName('')
+            setSplitMode(false)
+            setSplitRows([{ category_id: '', amount: '', memo: '' }, { category_id: '', amount: '', memo: '' }])
+        }
+    }, [open, editing])
+
+    useEffect(() => {
+        if (!open) return
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            if (!session) return
+            fetch('/api/payees', { headers: { 'Authorization': `Bearer ${session.access_token}` } })
+                .then(r => r.ok ? r.json() : null)
+                .then(data => { if (data?.payees) setPayees(data.payees) })
+                .catch(() => {})
+        })
+    }, [open])
 
     // Only show non-system categories in the picker
     const selectableCategories = categories.filter((c) => !c.is_system)
 
+    const splitTotal = splitRows.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0)
+    const totalAmount = parseFloat(amount) || 0
+    const splitDiff = totalAmount - splitTotal
+
+    const handleSplitRowChange = (index: number, field: keyof SplitRow, value: string) => {
+        setSplitRows(prev => prev.map((row, i) => i === index ? { ...row, [field]: value } : row))
+    }
+
+    const handleAddSplitRow = () => {
+        setSplitRows(prev => [...prev, { category_id: '', amount: '', memo: '' }])
+    }
+
+    const handleRemoveSplitRow = (index: number) => {
+        setSplitRows(prev => prev.filter((_, i) => i !== index))
+    }
+
+    const handleEnterSplitMode = () => {
+        setSplitMode(true)
+        setCategoryId('')
+    }
+
+    const handleExitSplitMode = () => {
+        setSplitMode(false)
+        setSplitRows([{ category_id: '', amount: '', memo: '' }, { category_id: '', amount: '', memo: '' }])
+    }
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!amount || !date) return
+
+        if (splitMode) {
+            const validSplits = splitRows.filter(r => r.amount && parseFloat(r.amount) !== 0)
+            if (validSplits.length < 2) {
+                alert('A split transaction requires at least 2 split lines.')
+                return
+            }
+            if (Math.abs(splitDiff) > 0.005) {
+                alert(`Split amounts must add up to the total. Difference: $${Math.abs(splitDiff).toFixed(2)}`)
+                return
+            }
+        }
 
         setLoading(true)
         try {
@@ -65,37 +178,59 @@ export function AddTransactionModal({
                 transactionAmount = Math.abs(transactionAmount)
             }
 
-            const response = await fetch('/api/transactions', {
-                method: 'POST',
+            let splits: { category_id: string | null; amount: number; memo: string | null }[] | undefined = undefined
+            if (splitMode) {
+                splits = splitRows
+                    .filter(r => r.amount && parseFloat(r.amount) !== 0)
+                    .map(r => ({
+                        category_id: r.category_id || null,
+                        amount: type === 'expense' ? -Math.abs(parseFloat(r.amount)) : Math.abs(parseFloat(r.amount)),
+                        memo: r.memo || null,
+                    }))
+            }
+
+            const body: Record<string, unknown> = {
+                category_id: splitMode ? null : (categoryId || null),
+                amount: transactionAmount,
+                date,
+                memo: memo || null,
+                type,
+                payee_name: payeeName.trim() || null,
+            }
+            if (splits !== undefined) body.splits = splits
+
+            const url = editing ? `/api/transactions/${editing.id}` : '/api/transactions'
+            const method = editing ? 'PATCH' : 'POST'
+
+            const response = await fetch(url, {
+                method,
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${session.access_token}`
                 },
-                body: JSON.stringify({
-                    account_id: account.id,
-                    category_id: categoryId || null,
-                    amount: transactionAmount,
-                    date,
-                    memo: memo || null,
-                    type,
-                })
+                body: JSON.stringify(editing ? body : { ...body, account_id: account.id })
             })
 
             if (response.ok) {
-                setMemo('')
-                setAmount('')
-                setDate(new Date().toISOString().split('T')[0])
-                setCategoryId('')
-                setType('expense')
+                if (!editing) {
+                    setMemo('')
+                    setAmount('')
+                    setDate(new Date().toISOString().split('T')[0])
+                    setCategoryId('')
+                    setType('expense')
+                    setPayeeName('')
+                    setSplitMode(false)
+                    setSplitRows([{ category_id: '', amount: '', memo: '' }, { category_id: '', amount: '', memo: '' }])
+                }
                 onTransactionAdded()
                 onOpenChange(false)
             } else {
-                const error = await response.json()
-                alert(`Error: ${error.error}`)
+                const err = await response.json()
+                alert(`Error: ${err.error}`)
             }
         } catch (error) {
-            console.error('Error creating transaction:', error)
-            alert('Error creating transaction')
+            console.error('Error saving transaction:', error)
+            alert('Error saving transaction')
         } finally {
             setLoading(false)
         }
@@ -103,16 +238,19 @@ export function AddTransactionModal({
 
     const handleTypeChange = (newType: 'income' | 'expense' | 'transfer') => {
         setType(newType)
-        if (newType === 'transfer') setCategoryId('')
+        if (newType === 'transfer') {
+            setCategoryId('')
+            setSplitMode(false)
+        }
     }
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-[500px]">
+            <DialogContent className="sm:max-w-[540px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                    <DialogTitle>Add New Transaction</DialogTitle>
+                    <DialogTitle>{editing ? 'Edit Transaction' : 'Add New Transaction'}</DialogTitle>
                     <DialogDescription>
-                        Record a new transaction for {account.name}.
+                        {editing ? 'Update this transaction.' : `Record a new transaction for ${account.name}.`}
                     </DialogDescription>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">
@@ -145,29 +283,75 @@ export function AddTransactionModal({
                     </div>
 
                     <div className="space-y-2">
+                        <Label htmlFor="payee">Payee</Label>
+                        <Input
+                            id="payee"
+                            list="payee-suggestions"
+                            placeholder="e.g., Amazon, Whole Foods"
+                            value={payeeName}
+                            onChange={(e) => {
+                                const val = e.target.value
+                                setPayeeName(val)
+                                const match = payees.find(p => p.name.toLowerCase() === val.toLowerCase())
+                                if (match?.default_category_id && !categoryId) {
+                                    setCategoryId(match.default_category_id)
+                                }
+                            }}
+                        />
+                        <datalist id="payee-suggestions">
+                            {payees.map((p) => (
+                                <option key={p.id} value={p.name} />
+                            ))}
+                        </datalist>
+                    </div>
+
+                    <div className="space-y-2">
                         <Label htmlFor="memo">Memo</Label>
                         <Input
                             id="memo"
-                            placeholder="e.g., Grocery shopping, Salary"
+                            placeholder="Optional note"
                             value={memo}
                             onChange={(e) => setMemo(e.target.value)}
                         />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="date">Date</Label>
+                        <Input
+                            id="date"
+                            type="date"
+                            value={date}
+                            onChange={(e) => setDate(e.target.value)}
+                            required
+                        />
+                    </div>
+
+                    {/* Category / Split section */}
+                    {type !== 'transfer' && (
                         <div className="space-y-2">
-                            <Label htmlFor="date">Date</Label>
-                            <Input
-                                id="date"
-                                type="date"
-                                value={date}
-                                onChange={(e) => setDate(e.target.value)}
-                                required
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="category">Category</Label>
-                            {type !== 'transfer' ? (
+                            <div className="flex items-center justify-between">
+                                <Label>Category</Label>
+                                {!splitMode ? (
+                                    <button
+                                        type="button"
+                                        className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                                        onClick={handleEnterSplitMode}
+                                    >
+                                        <Split className="h-3 w-3" />
+                                        Split
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        className="text-xs text-gray-500 hover:underline"
+                                        onClick={handleExitSplitMode}
+                                    >
+                                        Cancel Split
+                                    </button>
+                                )}
+                            </div>
+
+                            {!splitMode ? (
                                 <Select value={categoryId} onValueChange={setCategoryId}>
                                     <SelectTrigger>
                                         <SelectValue placeholder="Select a category" />
@@ -181,12 +365,76 @@ export function AddTransactionModal({
                                     </SelectContent>
                                 </Select>
                             ) : (
-                                <div className="text-sm text-gray-500 py-2 px-3 bg-gray-50 rounded-md">
-                                    Transfers don't use categories
+                                <div className="border rounded-md p-3 space-y-2 bg-gray-50">
+                                    <div className="grid grid-cols-[1fr_100px_1fr_24px] gap-1 text-xs font-medium text-gray-500 px-1">
+                                        <span>Category</span>
+                                        <span>Amount</span>
+                                        <span>Memo</span>
+                                        <span></span>
+                                    </div>
+                                    {splitRows.map((row, i) => (
+                                        <div key={i} className="grid grid-cols-[1fr_100px_1fr_24px] gap-1 items-center">
+                                            <Select value={row.category_id} onValueChange={(v) => handleSplitRowChange(i, 'category_id', v)}>
+                                                <SelectTrigger className="h-8 text-xs">
+                                                    <SelectValue placeholder="Category" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {selectableCategories.map((c) => (
+                                                        <SelectItem key={c.id} value={c.id}>
+                                                            {c.group_name} — {c.name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <Input
+                                                type="number"
+                                                step="0.01"
+                                                placeholder="0.00"
+                                                value={row.amount}
+                                                onChange={(e) => handleSplitRowChange(i, 'amount', e.target.value)}
+                                                className="h-8 text-xs"
+                                            />
+                                            <Input
+                                                placeholder="Memo"
+                                                value={row.memo}
+                                                onChange={(e) => handleSplitRowChange(i, 'memo', e.target.value)}
+                                                className="h-8 text-xs"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRemoveSplitRow(i)}
+                                                disabled={splitRows.length <= 2}
+                                                className="text-gray-400 hover:text-red-500 disabled:opacity-30"
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                    <div className="flex items-center justify-between pt-1">
+                                        <button
+                                            type="button"
+                                            onClick={handleAddSplitRow}
+                                            className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                                        >
+                                            <Plus className="h-3 w-3" />
+                                            Add row
+                                        </button>
+                                        <span className={`text-xs font-medium ${Math.abs(splitDiff) < 0.005 ? 'text-green-600' : 'text-red-600'}`}>
+                                            {Math.abs(splitDiff) < 0.005
+                                                ? '✓ Balanced'
+                                                : `$${Math.abs(splitDiff).toFixed(2)} ${splitDiff > 0 ? 'remaining' : 'over'}`}
+                                        </span>
+                                    </div>
                                 </div>
                             )}
                         </div>
-                    </div>
+                    )}
+
+                    {type === 'transfer' && (
+                        <div className="text-sm text-gray-500 py-2 px-3 bg-gray-50 rounded-md">
+                            Transfers don't use categories
+                        </div>
+                    )}
 
                     <div className="text-xs space-y-1">
                         {type === 'income' && (
@@ -205,7 +453,7 @@ export function AddTransactionModal({
                             Cancel
                         </Button>
                         <Button type="submit" disabled={loading}>
-                            {loading ? 'Creating...' : 'Create Transaction'}
+                            {loading ? (editing ? 'Saving...' : 'Creating...') : (editing ? 'Update Transaction' : 'Create Transaction')}
                         </Button>
                     </DialogFooter>
                 </form>

@@ -7,8 +7,10 @@ import { TopNav } from '@/app/dashboard/top-nav'
 import { Sidebar } from '@/app/dashboard/sidebar'
 import { BudgetView } from '@/app/dashboard/budget-view'
 import { TransactionsView } from '@/app/dashboard/transactions-view'
+import { ScheduledTransactionsView } from '@/app/dashboard/scheduled-transactions-view'
 import { ReportsView } from '@/app/dashboard/reports-view'
 import { Button } from '@/components/ui/button'
+import { ManagePayeesModal } from '@/app/dashboard/manage-payees-modal'
 
 export interface Account {
     id: string
@@ -34,7 +36,8 @@ export function Dashboard() {
     const [accounts, setAccounts] = useState<Account[]>([])
     const [categories, setCategories] = useState<Category[]>([])
     const [selectedAccount, setSelectedAccount] = useState<Account | null>(null)
-    const [currentView, setCurrentView] = useState<'budget' | 'transactions' | 'reports'>('budget')
+    const [currentView, setCurrentView] = useState<'budget' | 'transactions' | 'scheduled' | 'reports'>('budget')
+    const [showManagePayees, setShowManagePayees] = useState(false)
     const [currentMonth, setCurrentMonth] = useState(() => {
         const now = new Date()
         return { month: now.getMonth() + 1, year: now.getFullYear() }
@@ -135,6 +138,13 @@ export function Dashboard() {
 
                             <div className="flex space-x-2">
                                 <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setShowManagePayees(true)}
+                                >
+                                    Payees
+                                </Button>
+                                <Button
                                     variant={currentView === 'budget' ? 'default' : 'outline'}
                                     onClick={() => setCurrentView('budget')}
                                 >
@@ -145,6 +155,12 @@ export function Dashboard() {
                                     onClick={() => setCurrentView('transactions')}
                                 >
                                     Transactions
+                                </Button>
+                                <Button
+                                    variant={currentView === 'scheduled' ? 'default' : 'outline'}
+                                    onClick={() => setCurrentView('scheduled')}
+                                >
+                                    Scheduled
                                 </Button>
                                 <Button
                                     variant={currentView === 'reports' ? 'default' : 'outline'}
@@ -171,6 +187,12 @@ export function Dashboard() {
                             currentMonth={currentMonth.month}
                             currentYear={currentMonth.year}
                         />
+                    ) : currentView === 'scheduled' ? (
+                        <ScheduledTransactionsView
+                            accounts={accounts}
+                            categories={categories}
+                            onTransactionAdded={fetchAccounts}
+                        />
                     ) : (
                         <ReportsView
                             month={currentMonth.month}
@@ -179,6 +201,11 @@ export function Dashboard() {
                     )}
                 </div>
             </div>
+            <ManagePayeesModal
+                open={showManagePayees}
+                onOpenChange={setShowManagePayees}
+                categories={categories}
+            />
         </div>
     )
 }

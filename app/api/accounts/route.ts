@@ -105,6 +105,87 @@ export async function POST(request: NextRequest) {
             return createErrorResponse('Failed to create account', 500)
         }
 
+        // For CC / Line of Credit accounts: auto-create a payment category
+        const isCreditAccount = type_name === 'Credit Card' || type_name === 'Line of Credit'
+        let paymentCategoryId: string | null = null
+
+        if (isCreditAccount) {
+            // Find or create the "Credit Card Payments" category group
+            const groupName = 'Credit Card Payments'
+            const { data: existingGroup } = await supabase
+                .from('category_groups')
+                .select('id')
+                .eq('user_id', user.id)
+                .eq('name', groupName)
+                .maybeSingle()
+
+            let groupId: string
+            if (existingGroup) {
+                groupId = existingGroup.id
+            } else {
+                const { data: newGroup, error: groupError } = await supabase
+                    .from('category_groups')
+                    .insert({ user_id: user.id, name: groupName, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+                    .select('id')
+                    .single()
+                if (groupError || !newGroup) {
+                    await supabase.from('accounts').delete().eq('id', account.id)
+                    return createErrorResponse('Failed to create CC payment group', 500)
+                }
+                groupId = newGroup.id
+            }
+
+            // Create the payment category for this specific account
+            const { data: paymentCategory, error: catError } = await supabase
+                .from('categories')
+                .insert({
+                    user_id: user.id,
+                    group_id: groupId,
+                    name: `${name} Payment`,
+                    is_system: true,
+                    is_hidden: false,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                })
+                .select('id')
+                .single()
+
+            if (catError || !paymentCategory) {
+                await supabase.from('accounts').delete().eq('id', account.id)
+                return createErrorResponse('Failed to create CC payment category', 500)
+            }
+
+            paymentCategoryId = paymentCategory.id
+
+            // Link the payment category to the account
+            await supabase
+                .from('accounts')
+                .update({ payment_category_id: paymentCategoryId, updated_at: new Date().toISOString() })
+                .eq('id', account.id)
+
+            // Seed a $0 allocation in the current month's budget if one exists
+            const now = new Date()
+            const { data: currentBudget } = await supabase
+                .from('budgets')
+                .select('id')
+                .eq('user_id', user.id)
+                .eq('month', now.getMonth() + 1)
+                .eq('year', now.getFullYear())
+                .maybeSingle()
+
+            if (currentBudget) {
+                await supabase
+                    .from('category_allocations')
+                    .upsert({
+                        budget_id: currentBudget.id,
+                        category_id: paymentCategoryId,
+                        budgeted_amount: 0,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                    }, { onConflict: 'budget_id,category_id' })
+            }
+        }
+
         // Create a starting balance transaction if provided
         let balance = 0
         const amount = starting_balance !== undefined ? parseFloat(starting_balance) : 0
@@ -113,6 +194,9 @@ export async function POST(request: NextRequest) {
                 .from('transactions')
                 .insert({
                     account_id: account.id,
+                    // For CC accounts, assign negative starting balance to the payment category
+                    // so it reflects the pre-existing debt in the CC Payment category available
+                    category_id: (isCreditAccount && paymentCategoryId && amount < 0) ? paymentCategoryId : null,
                     amount,
                     date: new Date().toISOString().split('T')[0],
                     memo: 'Starting Balance',
@@ -138,6 +222,7 @@ export async function POST(request: NextRequest) {
                 is_liability: accountType.is_liability,
                 is_budget_account: accountType.is_budget_account,
                 is_closed: false,
+                payment_category_id: paymentCategoryId,
                 balance,
             }
         }, { status: 201 })

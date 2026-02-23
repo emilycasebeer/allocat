@@ -24,10 +24,15 @@ export async function GET(request: NextRequest) {
                 categories(
                     name,
                     category_groups(name)
+                ),
+                payees(name),
+                splits:transactions!parent_transaction_id(
+                    id, amount, memo, category_id,
+                    categories(name, category_groups(name))
                 )
             `)
             .eq('accounts.user_id', user.id)
-            .is('parent_transaction_id', null) // exclude subtransactions from top-level list
+            .is('parent_transaction_id', null)
 
         if (accountId) query = query.eq('account_id', accountId)
         if (categoryId) query = query.eq('category_id', categoryId)
@@ -40,13 +45,24 @@ export async function GET(request: NextRequest) {
             return createErrorResponse(error.message, 500)
         }
 
-        // Flatten category group name for UI compatibility
         const result = (transactions ?? []).map((t) => {
             const cat = t.categories as any
+            const payee = t.payees as any
+            const rawSplits = (t.splits as any[]) ?? []
+            const splits = rawSplits.map((s) => ({
+                id: s.id,
+                amount: s.amount,
+                memo: s.memo,
+                category_id: s.category_id,
+                category_name: s.categories?.name ?? null,
+                group_name: s.categories?.category_groups?.name ?? null,
+            }))
             return {
                 ...t,
                 category_name: cat?.name ?? null,
                 group_name: cat?.category_groups?.name ?? null,
+                payee_name: payee?.name ?? null,
+                splits,
             }
         })
 
@@ -65,7 +81,7 @@ export async function POST(request: NextRequest) {
         const supabase = await createServerSupabaseClient()
         const body = await request.json()
 
-        const { account_id, category_id, amount, date, memo, type } = body
+        const { account_id, category_id, amount, date, memo, type, payee_name, splits } = body
 
         if (!account_id || amount === undefined || !date || !type) {
             return createErrorResponse('account_id, amount, date, and type are required', 400)
@@ -83,8 +99,8 @@ export async function POST(request: NextRequest) {
             return createErrorResponse('Account not found', 404)
         }
 
-        // Verify category belongs to user (if provided)
-        if (category_id) {
+        // Verify category belongs to user (if provided and not a split)
+        if (category_id && !splits) {
             const { data: category, error: categoryError } = await supabase
                 .from('categories')
                 .select('id')
@@ -97,16 +113,43 @@ export async function POST(request: NextRequest) {
             }
         }
 
+        // Resolve payee: find or create by name
+        let payee_id: string | null = null
+        if (payee_name && payee_name.trim()) {
+            const trimmedName = payee_name.trim()
+            const { data: existingPayee } = await supabase
+                .from('payees')
+                .select('id')
+                .eq('user_id', user.id)
+                .eq('name', trimmedName)
+                .maybeSingle()
+
+            if (existingPayee) {
+                payee_id = existingPayee.id
+            } else {
+                const { data: newPayee } = await supabase
+                    .from('payees')
+                    .insert({ user_id: user.id, name: trimmedName })
+                    .select('id')
+                    .single()
+                payee_id = newPayee?.id ?? null
+            }
+        }
+
+        const isSplit = Array.isArray(splits) && splits.length > 0
+
         const { data: transaction, error } = await supabase
             .from('transactions')
             .insert({
                 account_id,
-                category_id: category_id ?? null,
+                category_id: isSplit ? null : (category_id ?? null),
+                payee_id,
                 amount: parseFloat(amount),
                 date,
                 memo: memo ?? null,
                 type,
                 cleared: 'uncleared',
+                is_split: isSplit,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
             })
@@ -115,6 +158,29 @@ export async function POST(request: NextRequest) {
 
         if (error) {
             return createErrorResponse(error.message, 500)
+        }
+
+        // Insert split children
+        if (isSplit) {
+            const children = splits.map((s: { category_id: string | null; amount: number; memo?: string }) => ({
+                account_id,
+                parent_transaction_id: transaction.id,
+                category_id: s.category_id ?? null,
+                amount: s.amount,
+                memo: s.memo ?? null,
+                date,
+                type,
+                cleared: 'uncleared',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+            }))
+
+            const { error: splitError } = await supabase.from('transactions').insert(children)
+            if (splitError) {
+                // Roll back parent if children fail
+                await supabase.from('transactions').delete().eq('id', transaction.id)
+                return createErrorResponse(splitError.message, 500)
+            }
         }
 
         return NextResponse.json({ transaction }, { status: 201 })

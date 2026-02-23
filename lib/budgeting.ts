@@ -1,6 +1,14 @@
 import { createServerSupabaseClient } from './supabase'
 import Decimal from 'decimal.js'
 
+export interface CategoryGoal {
+    id: string
+    goal_type: 'target_balance' | 'target_balance_by_date' | 'monthly_savings' | 'monthly_spending' | 'debt_payoff'
+    target_amount: number | null
+    target_date: string | null
+    monthly_amount: number | null
+}
+
 export interface BudgetCategoryRow {
     id: string
     name: string
@@ -8,6 +16,7 @@ export interface BudgetCategoryRow {
     budgeted_amount: number
     activity_amount: number
     available_amount: number
+    goal: CategoryGoal | null
 }
 
 export interface BudgetSummary {
@@ -216,6 +225,59 @@ export class BudgetingEngine {
     }
 
     /**
+     * Compute the net CC activity for a payment category: charges - payments.
+     * Charges = categorized expenses on the CC account (top-level + split children).
+     * Payments = transfers TO the CC account (positive amounts on the CC side).
+     */
+    private async computeCCActivity(accountId: string, month: number, year: number): Promise<number> {
+        const supabase = await createServerSupabaseClient()
+
+        const startDate = `${year}-${String(month).padStart(2, '0')}-01`
+        const endDate = new Date(year, month, 0).toISOString().split('T')[0]
+
+        // Top-level categorized expenses (excludes split parents whose category_id is null)
+        const { data: topLevel } = await supabase
+            .from('transactions')
+            .select('amount')
+            .eq('account_id', accountId)
+            .eq('type', 'expense')
+            .not('category_id', 'is', null)
+            .gte('date', startDate)
+            .lte('date', endDate)
+            .is('parent_transaction_id', null)
+
+        // Split children on this CC account (parent_transaction_id IS NOT NULL, have category_id)
+        const { data: splitChildren } = await supabase
+            .from('transactions')
+            .select('amount')
+            .eq('account_id', accountId)
+            .eq('type', 'expense')
+            .not('category_id', 'is', null)
+            .not('parent_transaction_id', 'is', null)
+            .gte('date', startDate)
+            .lte('date', endDate)
+
+        // Transfers TO the CC (positive amount on CC side = payment from checking)
+        const { data: payments } = await supabase
+            .from('transactions')
+            .select('amount')
+            .eq('account_id', accountId)
+            .eq('type', 'transfer')
+            .gt('amount', 0)
+            .gte('date', startDate)
+            .lte('date', endDate)
+            .is('parent_transaction_id', null)
+
+        const charges = [...(topLevel ?? []), ...(splitChildren ?? [])]
+            .reduce((sum, t) => new Decimal(sum).minus(t.amount).toNumber(), 0)
+
+        const totalPayments = (payments ?? [])
+            .reduce((sum, t) => new Decimal(sum).plus(t.amount).toNumber(), 0)
+
+        return new Decimal(charges).minus(totalPayments).toNumber()
+    }
+
+    /**
      * Get a full budget summary for a month with all values computed from transactions.
      */
     async getBudgetSummary(userId: string, month: number, year: number): Promise<BudgetSummary> {
@@ -233,6 +295,20 @@ export class BudgetingEngine {
             throw new Error('Budget not found for specified month')
         }
 
+        // Build a map of payment_category_id → account_id for all CC accounts
+        const { data: ccAccounts } = await supabase
+            .from('accounts')
+            .select('id, payment_category_id')
+            .eq('user_id', userId)
+            .not('payment_category_id', 'is', null)
+
+        const ccPaymentMap = new Map<string, string>() // category_id → account_id
+        for (const acc of ccAccounts ?? []) {
+            if (acc.payment_category_id) {
+                ccPaymentMap.set(acc.payment_category_id, acc.id)
+            }
+        }
+
         const { data: allocations } = await supabase
             .from('category_allocations')
             .select(`
@@ -241,7 +317,10 @@ export class BudgetingEngine {
                 budgeted_amount,
                 categories!inner(
                     name,
-                    category_groups!inner(name)
+                    category_groups!inner(name),
+                    category_goals(
+                        id, goal_type, target_amount, target_date, monthly_amount
+                    )
                 )
             `)
             .eq('budget_id', budget.id)
@@ -251,7 +330,16 @@ export class BudgetingEngine {
         for (const alloc of allocations ?? []) {
             const cat = alloc.categories as any
             const activity = await this.computeActivity(alloc.category_id, month, year)
-            const available = await this.computeAvailable(alloc.category_id, month, year, userId)
+            let available = await this.computeAvailable(alloc.category_id, month, year, userId)
+
+            // Auto-credit CC payment categories with the sum of categorized CC charges this month
+            const ccAccountId = ccPaymentMap.get(alloc.category_id)
+            if (ccAccountId) {
+                const ccActivity = await this.computeCCActivity(ccAccountId, month, year)
+                available = new Decimal(available).plus(ccActivity).toNumber()
+            }
+
+            const goalRow = Array.isArray(cat.category_goals) ? cat.category_goals[0] : cat.category_goals
 
             categories.push({
                 id: alloc.category_id,
@@ -260,6 +348,7 @@ export class BudgetingEngine {
                 budgeted_amount: alloc.budgeted_amount,
                 activity_amount: activity,
                 available_amount: available,
+                goal: goalRow ?? null,
             })
         }
 
