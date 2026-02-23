@@ -35,6 +35,8 @@ export interface EditingTransaction {
     cleared: 'uncleared' | 'cleared' | 'reconciled'
     is_split?: boolean
     splits?: { id: string; category_id: string | null; amount: number; memo: string | null }[]
+    transfer_transaction_id?: string | null
+    to_account_id?: string | null
 }
 
 interface SplitRow {
@@ -47,6 +49,7 @@ interface AddTransactionModalProps {
     open: boolean
     onOpenChange: (open: boolean) => void
     account: Account
+    accounts: Account[]
     categories: Category[]
     onTransactionAdded: () => void
     editing?: EditingTransaction | null
@@ -58,9 +61,12 @@ export function AddTransactionModal({
     open,
     onOpenChange,
     account,
+    accounts,
     categories,
     onTransactionAdded,
     editing,
+    currentMonth,
+    currentYear,
 }: AddTransactionModalProps) {
     const [memo, setMemo] = useState('')
     const [amount, setAmount] = useState('')
@@ -68,6 +74,7 @@ export function AddTransactionModal({
     const [categoryId, setCategoryId] = useState<string>('')
     const [type, setType] = useState<'income' | 'expense' | 'transfer'>('expense')
     const [payeeName, setPayeeName] = useState('')
+    const [toAccountId, setToAccountId] = useState<string>('')
     const [payees, setPayees] = useState<{ id: string; name: string; default_category_id: string | null }[]>([])
     const [loading, setLoading] = useState(false)
     const [splitMode, setSplitMode] = useState(false)
@@ -75,6 +82,14 @@ export function AddTransactionModal({
         { category_id: '', amount: '', memo: '' },
         { category_id: '', amount: '', memo: '' },
     ])
+
+    const getDefaultDate = () => {
+        const now = new Date()
+        if (!currentMonth || !currentYear) return now.toISOString().split('T')[0]
+        const isCurrentMonth = currentMonth === now.getMonth() + 1 && currentYear === now.getFullYear()
+        if (isCurrentMonth) return now.toISOString().split('T')[0]
+        return `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`
+    }
 
     // Pre-fill form when editing an existing transaction
     useEffect(() => {
@@ -85,6 +100,7 @@ export function AddTransactionModal({
             setDate(editing.date)
             setMemo(editing.memo ?? '')
             setPayeeName(editing.payee_name ?? '')
+            setToAccountId(editing.to_account_id ?? '')
             if (editing.is_split && editing.splits && editing.splits.length > 0) {
                 setSplitMode(true)
                 setSplitRows(editing.splits.map(s => ({
@@ -101,10 +117,11 @@ export function AddTransactionModal({
         } else {
             setMemo('')
             setAmount('')
-            setDate(new Date().toISOString().split('T')[0])
+            setDate(getDefaultDate())
             setCategoryId('')
             setType('expense')
             setPayeeName('')
+            setToAccountId('')
             setSplitMode(false)
             setSplitRows([{ category_id: '', amount: '', memo: '' }, { category_id: '', amount: '', memo: '' }])
         }
@@ -166,6 +183,12 @@ export function AddTransactionModal({
             }
         }
 
+        // For new transfers, require a destination account
+        if (type === 'transfer' && !editing && !toAccountId) {
+            alert('Please select a destination account for the transfer.')
+            return
+        }
+
         setLoading(true)
         try {
             const { data: { session } } = await supabase.auth.getSession()
@@ -176,6 +199,9 @@ export function AddTransactionModal({
                 transactionAmount = -Math.abs(transactionAmount)
             } else if (type === 'income') {
                 transactionAmount = Math.abs(transactionAmount)
+            } else if (type === 'transfer') {
+                // Source account loses money; paired leg (destination) will get the positive amount
+                transactionAmount = -Math.abs(transactionAmount)
             }
 
             let splits: { category_id: string | null; amount: number; memo: string | null }[] | undefined = undefined
@@ -197,7 +223,18 @@ export function AddTransactionModal({
                 type,
                 payee_name: payeeName.trim() || null,
             }
-            if (splits !== undefined) body.splits = splits
+
+            if (splits !== undefined) {
+                body.splits = splits
+            } else if (editing && editing.is_split && !splitMode) {
+                // Switching from split to non-split: signal backend to clear children
+                body.splits = []
+            }
+
+            // For new transfers, include the destination account
+            if (type === 'transfer' && !editing) {
+                body.to_account_id = toAccountId
+            }
 
             const url = editing ? `/api/transactions/${editing.id}` : '/api/transactions'
             const method = editing ? 'PATCH' : 'POST'
@@ -215,10 +252,11 @@ export function AddTransactionModal({
                 if (!editing) {
                     setMemo('')
                     setAmount('')
-                    setDate(new Date().toISOString().split('T')[0])
+                    setDate(getDefaultDate())
                     setCategoryId('')
                     setType('expense')
                     setPayeeName('')
+                    setToAccountId('')
                     setSplitMode(false)
                     setSplitRows([{ category_id: '', amount: '', memo: '' }, { category_id: '', amount: '', memo: '' }])
                 }
@@ -241,6 +279,8 @@ export function AddTransactionModal({
         if (newType === 'transfer') {
             setCategoryId('')
             setSplitMode(false)
+        } else {
+            setToAccountId('')
         }
     }
 
@@ -431,8 +471,29 @@ export function AddTransactionModal({
                     )}
 
                     {type === 'transfer' && (
-                        <div className="text-sm text-gray-500 py-2 px-3 bg-gray-50 rounded-md">
-                            Transfers don't use categories
+                        <div className="space-y-2">
+                            <Label>To Account</Label>
+                            {editing?.transfer_transaction_id ? (
+                                <div className="text-sm text-gray-600 py-2 px-3 bg-gray-50 rounded-md">
+                                    {accounts.find(a => a.id === editing.to_account_id)?.name ?? 'Linked account'}
+                                    <span className="ml-1 text-xs text-gray-400">(edit amount/date to update both sides)</span>
+                                </div>
+                            ) : (
+                                <Select value={toAccountId} onValueChange={setToAccountId}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select destination account" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {accounts
+                                            .filter(a => a.id !== account.id)
+                                            .map(a => (
+                                                <SelectItem key={a.id} value={a.id}>
+                                                    {a.name}
+                                                </SelectItem>
+                                            ))}
+                                    </SelectContent>
+                                </Select>
+                            )}
                         </div>
                     )}
 
@@ -442,9 +503,6 @@ export function AddTransactionModal({
                         )}
                         {type === 'expense' && (
                             <p className="text-red-700">↓ Expenses reduce your category Available amounts</p>
-                        )}
-                        {type === 'transfer' && (
-                            <p className="text-blue-700">↔ Transfers move money between accounts</p>
                         )}
                     </div>
 

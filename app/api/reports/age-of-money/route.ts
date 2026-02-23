@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createAuthenticatedSupabaseClient } from '@/lib/supabase'
 import { requireAuth } from '@/lib/auth'
 
 export async function GET(request: NextRequest) {
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
             )
         }
 
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
 
         // Get the start and end dates for the month
         const startDate = new Date(year, month - 1, 1)

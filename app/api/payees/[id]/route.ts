@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createAuthenticatedSupabaseClient } from '@/lib/supabase'
 
 const createErrorResponse = (message: string, status: number) =>
     NextResponse.json({ error: message }, { status })
@@ -11,7 +11,7 @@ export async function PUT(
 ) {
     try {
         const user = await requireAuth(request)
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
         const { id } = await params
         const body = await request.json()
         const { name, default_category_id } = body
@@ -66,7 +66,7 @@ export async function DELETE(
 ) {
     try {
         const user = await requireAuth(request)
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
         const { id } = await params
 
         const { data: existing, error: fetchError } = await supabase

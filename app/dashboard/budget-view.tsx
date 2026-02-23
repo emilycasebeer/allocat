@@ -73,6 +73,11 @@ function GoalProgress({ goal, available }: { goal: CategoryGoal; available: numb
     )
 }
 
+const formatCurrency = (amount: number) => {
+    const abs = Math.abs(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    return amount < 0 ? `-$${abs}` : `$${abs}`
+}
+
 export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
     const [budgetSummary, setBudgetSummary] = useState<BudgetSummary | null>(null)
     const [loading, setLoading] = useState(true)
@@ -265,7 +270,7 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
                 </CardHeader>
                 <CardContent>
                     <div className={`text-4xl font-bold ${budgetSummary.to_be_budgeted >= 0 ? 'text-blue-900' : 'text-red-700'}`}>
-                        ${budgetSummary.to_be_budgeted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {formatCurrency(budgetSummary.to_be_budgeted)}
                     </div>
                 </CardContent>
             </Card>
@@ -352,15 +357,15 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
                                                             className="cursor-pointer hover:bg-gray-100 px-2 py-1 rounded"
                                                             onClick={() => handleBudgetEdit(category.id, category.budgeted_amount)}
                                                         >
-                                                            ${category.budgeted_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                            {formatCurrency(category.budgeted_amount)}
                                                         </span>
                                                     )}
                                                 </td>
                                                 <td className={`text-right ${category.activity_amount < 0 ? 'amount-negative' : 'amount-positive'}`}>
-                                                    ${category.activity_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    {formatCurrency(category.activity_amount)}
                                                 </td>
                                                 <td className={`text-right ${getAvailableClass(category.available_amount)}`}>
-                                                    ${category.available_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    {formatCurrency(category.available_amount)}
                                                 </td>
                                                 <td className="text-center">
                                                     <div className="flex items-center justify-center gap-1">
@@ -393,12 +398,12 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
                                 ))}
                                 <tr className="bg-gray-50 font-semibold">
                                     <td>Total</td>
-                                    <td className="text-right">${totalBudgeted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                    <td className="text-right">{formatCurrency(totalBudgeted)}</td>
                                     <td className={`text-right ${totalActivity < 0 ? 'amount-negative' : 'amount-positive'}`}>
-                                        ${totalActivity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        {formatCurrency(totalActivity)}
                                     </td>
                                     <td className={`text-right ${getAvailableClass(totalAvailable)}`}>
-                                        ${totalAvailable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        {formatCurrency(totalAvailable)}
                                     </td>
                                     <td></td>
                                 </tr>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createAuthenticatedSupabaseClient } from '@/lib/supabase'
 
 const createErrorResponse = (message: string, status: number) =>
     NextResponse.json({ error: message }, { status })
@@ -21,7 +21,7 @@ export async function PATCH(
 ) {
     try {
         const user = await requireAuth(request)
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
         const { id } = await params
         const body = await request.json()
 
@@ -66,6 +66,8 @@ export async function PATCH(
         if (category_id !== undefined) updatePayload.category_id = category_id ?? null
         if (flag_color !== undefined) updatePayload.flag_color = flag_color ?? null
         if (payee_id !== undefined) updatePayload.payee_id = payee_id
+        // When splits array is provided, derive is_split from whether it's non-empty
+        if (Array.isArray(splits)) updatePayload.is_split = splits.length > 0
 
         const { data: transaction, error } = await supabase
             .from('transactions')
@@ -123,11 +125,14 @@ export async function DELETE(
 ) {
     try {
         const user = await requireAuth(request)
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
         const { id } = await params
 
-        const { found } = await verifyOwnership(supabase, id, user.id)
+        const { found, transaction: existing } = await verifyOwnership(supabase, id, user.id)
         if (!found) return createErrorResponse('Transaction not found', 404)
+
+        // Save pair ID before deleting (ON DELETE SET NULL would clear it on the pair)
+        const pairId = existing?.transfer_transaction_id ?? null
 
         const { error } = await supabase
             .from('transactions')
@@ -135,6 +140,11 @@ export async function DELETE(
             .eq('id', id)
 
         if (error) return createErrorResponse(error.message, 500)
+
+        // Delete the paired transfer leg (schema uses ON DELETE SET NULL, not CASCADE)
+        if (pairId) {
+            await supabase.from('transactions').delete().eq('id', pairId)
+        }
 
         return NextResponse.json({ message: 'Transaction deleted' })
     } catch (error) {

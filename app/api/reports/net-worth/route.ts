@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createAuthenticatedSupabaseClient } from '@/lib/supabase'
 
 export async function GET(request: NextRequest) {
     try {
         const user = await requireAuth(request)
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
         const { searchParams } = new URL(request.url)
         const months = parseInt(searchParams.get('months') || '12')
 

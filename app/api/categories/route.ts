@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createAuthenticatedSupabaseClient } from '@/lib/supabase'
 
 const createErrorResponse = (message: string, status: number) =>
     NextResponse.json({ error: message }, { status })
@@ -8,7 +8,7 @@ const createErrorResponse = (message: string, status: number) =>
 export async function GET(request: NextRequest) {
     try {
         const user = await requireAuth(request)
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
 
         const { data: categories, error } = await supabase
             .from('categories')
@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
     try {
         const user = await requireAuth(request)
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
         const body = await request.json()
 
         const { name, group_name } = body

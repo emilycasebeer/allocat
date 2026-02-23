@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createAuthenticatedSupabaseClient } from '@/lib/supabase'
 import { BudgetingEngine } from '@/lib/budgeting'
 import { z } from 'zod'
 
@@ -23,7 +23,8 @@ export async function GET(request: NextRequest) {
             return createErrorResponse('Valid month and year are required', 400)
         }
 
-        const engine = new BudgetingEngine()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
+        const engine = new BudgetingEngine(supabase)
         const budget = await engine.getBudgetSummary(user.id, month, year)
         return NextResponse.json({ budget })
     } catch (error) {
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
     try {
         const user = await requireAuth(request)
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
         const body = await request.json()
 
         const validation = postSchema.safeParse(body)
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
             .maybeSingle()
 
         if (existingBudget) {
-            const engine = new BudgetingEngine()
+            const engine = new BudgetingEngine(supabase)
             const budget = await engine.getBudgetSummary(user.id, month, year)
             return NextResponse.json({ budget })
         }
@@ -113,7 +114,7 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        const engine = new BudgetingEngine()
+        const engine = new BudgetingEngine(supabase)
         const summary = await engine.getBudgetSummary(user.id, month, year)
         return NextResponse.json({ budget: summary }, { status: 201 })
     } catch (error) {

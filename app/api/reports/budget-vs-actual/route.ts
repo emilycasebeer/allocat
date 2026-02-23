@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createAuthenticatedSupabaseClient } from '@/lib/supabase'
 import { requireAuth } from '@/lib/auth'
 import { BudgetingEngine } from '@/lib/budgeting'
 
@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'month and year are required' }, { status: 400 })
         }
 
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
 
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`
         const endDate = new Date(year, month, 0).toISOString().split('T')[0]

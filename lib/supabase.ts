@@ -43,6 +43,16 @@ export const createServerSupabaseClient = async () => {
     )
 }
 
+// Server-side client authenticated with a user's access token (for API routes).
+// This sets the Authorization header so RLS policies work correctly even when
+// the session is not available in cookies (e.g. bearer-token-only API calls).
+export const createAuthenticatedSupabaseClient = (accessToken: string) => {
+    return createClient<Database>(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: `Bearer ${accessToken}` } },
+        auth: { autoRefreshToken: false, persistSession: false },
+    })
+}
+
 // Browser client for client components
 export const createBrowserSupabaseClient = () => {
     return createBrowserClient<Database>(

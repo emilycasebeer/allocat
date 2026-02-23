@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createAuthenticatedSupabaseClient } from '@/lib/supabase'
 
 const createErrorResponse = (message: string, status: number) =>
     NextResponse.json({ error: message }, { status })
@@ -8,7 +8,7 @@ const createErrorResponse = (message: string, status: number) =>
 export async function GET(request: NextRequest) {
     try {
         const user = await requireAuth(request)
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
         const { searchParams } = new URL(request.url)
 
         const accountId = searchParams.get('account_id')
@@ -29,7 +29,8 @@ export async function GET(request: NextRequest) {
                 splits:transactions!parent_transaction_id(
                     id, amount, memo, category_id,
                     categories(name, category_groups(name))
-                )
+                ),
+                transfer_tx:transactions!transfer_transaction_id(account_id)
             `)
             .eq('accounts.user_id', user.id)
             .is('parent_transaction_id', null)
@@ -48,6 +49,7 @@ export async function GET(request: NextRequest) {
         const result = (transactions ?? []).map((t) => {
             const cat = t.categories as any
             const payee = t.payees as any
+            const transferTx = t.transfer_tx as any
             const rawSplits = (t.splits as any[]) ?? []
             const splits = rawSplits.map((s) => ({
                 id: s.id,
@@ -62,6 +64,7 @@ export async function GET(request: NextRequest) {
                 category_name: cat?.name ?? null,
                 group_name: cat?.category_groups?.name ?? null,
                 payee_name: payee?.name ?? null,
+                to_account_id: transferTx?.account_id ?? null,
                 splits,
             }
         })
@@ -78,13 +81,17 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
     try {
         const user = await requireAuth(request)
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
         const body = await request.json()
 
-        const { account_id, category_id, amount, date, memo, type, payee_name, splits } = body
+        const { account_id, category_id, amount, date, memo, type, payee_name, splits, to_account_id } = body
 
         if (!account_id || amount === undefined || !date || !type) {
             return createErrorResponse('account_id, amount, date, and type are required', 400)
+        }
+
+        if (type === 'transfer' && !to_account_id) {
+            return createErrorResponse('to_account_id is required for transfer transactions', 400)
         }
 
         // Verify account belongs to user
@@ -181,6 +188,52 @@ export async function POST(request: NextRequest) {
                 await supabase.from('transactions').delete().eq('id', transaction.id)
                 return createErrorResponse(splitError.message, 500)
             }
+        }
+
+        // Create the paired leg for transfers and link both sides
+        if (type === 'transfer' && to_account_id) {
+            // Verify destination account belongs to this user
+            const { data: toAccount, error: toAccountError } = await supabase
+                .from('accounts')
+                .select('id')
+                .eq('id', to_account_id)
+                .eq('user_id', user.id)
+                .single()
+
+            if (toAccountError || !toAccount) {
+                await supabase.from('transactions').delete().eq('id', transaction.id)
+                return createErrorResponse('Destination account not found', 404)
+            }
+
+            const { data: pairedTx, error: pairError } = await supabase
+                .from('transactions')
+                .insert({
+                    account_id: to_account_id,
+                    amount: -parseFloat(amount), // opposite sign: money arrives at destination
+                    date,
+                    memo: memo ?? null,
+                    type: 'transfer',
+                    cleared: 'uncleared',
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                })
+                .select()
+                .single()
+
+            if (pairError || !pairedTx) {
+                await supabase.from('transactions').delete().eq('id', transaction.id)
+                return createErrorResponse('Failed to create paired transfer transaction', 500)
+            }
+
+            // Link both legs to each other
+            await supabase
+                .from('transactions')
+                .update({ transfer_transaction_id: pairedTx.id })
+                .eq('id', transaction.id)
+            await supabase
+                .from('transactions')
+                .update({ transfer_transaction_id: transaction.id })
+                .eq('id', pairedTx.id)
         }
 
         return NextResponse.json({ transaction }, { status: 201 })

@@ -1,5 +1,5 @@
-import { createServerSupabaseClient } from './supabase'
 import Decimal from 'decimal.js'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
 export interface CategoryGoal {
     id: string
@@ -28,23 +28,22 @@ export interface BudgetSummary {
 }
 
 export class BudgetingEngine {
+    constructor(private supabase: SupabaseClient) {}
+
     /**
      * Compute the total activity (sum of transaction amounts) for a category in a given month.
-     * Excludes subtransactions (parent_transaction_id IS NOT NULL) to avoid double-counting splits.
+     * Includes both top-level and split-child transactions that carry this category_id.
      */
     async computeActivity(categoryId: string, month: number, year: number): Promise<number> {
-        const supabase = await createServerSupabaseClient()
-
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`
         const endDate = new Date(year, month, 0).toISOString().split('T')[0]
 
-        const { data, error } = await supabase
+        const { data, error } = await this.supabase
             .from('transactions')
             .select('amount')
             .eq('category_id', categoryId)
             .gte('date', startDate)
             .lte('date', endDate)
-            .is('parent_transaction_id', null)
 
         if (error || !data) return 0
 
@@ -73,10 +72,8 @@ export class BudgetingEngine {
             if (m === 0) { m = 12; y-- }
         }
 
-        const supabase = await createServerSupabaseClient()
-
         // Fetch all budget rows for this user in the range
-        const { data: budgets } = await supabase
+        const { data: budgets } = await this.supabase
             .from('budgets')
             .select('id, month, year')
             .eq('user_id', userId)
@@ -92,7 +89,7 @@ export class BudgetingEngine {
 
         // Fetch all allocations for this category across those budgets
         const budgetIds = budgets.map(b => b.id)
-        const { data: allocations } = await supabase
+        const { data: allocations } = await this.supabase
             .from('category_allocations')
             .select('budget_id, budgeted_amount')
             .eq('category_id', categoryId)
@@ -122,32 +119,52 @@ export class BudgetingEngine {
     }
 
     /**
+     * Returns the IDs of all on-budget accounts for a user.
+     * Uses two queries to avoid complex nested joins: accounts → account_types.
+     */
+    private async getBudgetAccountIds(userId: string): Promise<string[]> {
+        const { data: accounts } = await this.supabase
+            .from('accounts')
+            .select('id, on_budget, account_types(is_budget_account)')
+            .eq('user_id', userId)
+
+        return (accounts ?? [])
+            .filter(a => {
+                const type = a.account_types as any
+                return a.on_budget ?? type?.is_budget_account ?? true
+            })
+            .map(a => a.id)
+    }
+
+    /**
      * Compute To Be Budgeted for a given month.
      * TBB = max(0, TBB_last_month) + income_this_month - total_budgeted_this_month
      */
     async computeTBB(userId: string, month: number, year: number): Promise<number> {
-        const supabase = await createServerSupabaseClient()
-
-        // Income transactions for this user this month
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`
         const endDate = new Date(year, month, 0).toISOString().split('T')[0]
 
-        const { data: incomeData } = await supabase
-            .from('transactions')
-            .select('amount, accounts!inner(user_id)')
-            .eq('accounts.user_id', userId)
-            .eq('type', 'income')
-            .gte('date', startDate)
-            .lte('date', endDate)
-            .is('parent_transaction_id', null)
+        // Only count income from on-budget accounts
+        const budgetAccountIds = await this.getBudgetAccountIds(userId)
 
-        const totalIncome = (incomeData ?? []).reduce(
-            (sum, t) => new Decimal(sum).plus(t.amount).toNumber(),
-            0
-        )
+        let totalIncome = 0
+        if (budgetAccountIds.length > 0) {
+            const { data: incomeData } = await this.supabase
+                .from('transactions')
+                .select('amount')
+                .in('account_id', budgetAccountIds)
+                .eq('type', 'income')
+                .gte('date', startDate)
+                .lte('date', endDate)
+                .is('parent_transaction_id', null)
+
+            totalIncome = (incomeData ?? []).reduce(
+                (sum, t) => new Decimal(sum).plus(t.amount).toNumber(), 0
+            )
+        }
 
         // Total budgeted across all categories this month
-        const { data: budget } = await supabase
+        const { data: budget } = await this.supabase
             .from('budgets')
             .select('id')
             .eq('user_id', userId)
@@ -157,7 +174,7 @@ export class BudgetingEngine {
 
         let totalBudgeted = 0
         if (budget) {
-            const { data: allocations } = await supabase
+            const { data: allocations } = await this.supabase
                 .from('category_allocations')
                 .select('budgeted_amount')
                 .eq('budget_id', budget.id)
@@ -182,26 +199,28 @@ export class BudgetingEngine {
      * TBB for the rollover calculation, avoiding infinite recursion.
      */
     private async computeTBBRaw(userId: string, month: number, year: number): Promise<number> {
-        const supabase = await createServerSupabaseClient()
-
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`
         const endDate = new Date(year, month, 0).toISOString().split('T')[0]
 
-        const { data: incomeData } = await supabase
-            .from('transactions')
-            .select('amount, accounts!inner(user_id)')
-            .eq('accounts.user_id', userId)
-            .eq('type', 'income')
-            .gte('date', startDate)
-            .lte('date', endDate)
-            .is('parent_transaction_id', null)
+        const budgetAccountIds = await this.getBudgetAccountIds(userId)
 
-        const totalIncome = (incomeData ?? []).reduce(
-            (sum, t) => new Decimal(sum).plus(t.amount).toNumber(),
-            0
-        )
+        let totalIncome = 0
+        if (budgetAccountIds.length > 0) {
+            const { data: incomeData } = await this.supabase
+                .from('transactions')
+                .select('amount')
+                .in('account_id', budgetAccountIds)
+                .eq('type', 'income')
+                .gte('date', startDate)
+                .lte('date', endDate)
+                .is('parent_transaction_id', null)
 
-        const { data: budget } = await supabase
+            totalIncome = (incomeData ?? []).reduce(
+                (sum, t) => new Decimal(sum).plus(t.amount).toNumber(), 0
+            )
+        }
+
+        const { data: budget } = await this.supabase
             .from('budgets')
             .select('id')
             .eq('user_id', userId)
@@ -211,7 +230,7 @@ export class BudgetingEngine {
 
         if (!budget) return totalIncome
 
-        const { data: allocations } = await supabase
+        const { data: allocations } = await this.supabase
             .from('category_allocations')
             .select('budgeted_amount')
             .eq('budget_id', budget.id)
@@ -230,13 +249,11 @@ export class BudgetingEngine {
      * Payments = transfers TO the CC account (positive amounts on the CC side).
      */
     private async computeCCActivity(accountId: string, month: number, year: number): Promise<number> {
-        const supabase = await createServerSupabaseClient()
-
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`
         const endDate = new Date(year, month, 0).toISOString().split('T')[0]
 
         // Top-level categorized expenses (excludes split parents whose category_id is null)
-        const { data: topLevel } = await supabase
+        const { data: topLevel } = await this.supabase
             .from('transactions')
             .select('amount')
             .eq('account_id', accountId)
@@ -247,7 +264,7 @@ export class BudgetingEngine {
             .is('parent_transaction_id', null)
 
         // Split children on this CC account (parent_transaction_id IS NOT NULL, have category_id)
-        const { data: splitChildren } = await supabase
+        const { data: splitChildren } = await this.supabase
             .from('transactions')
             .select('amount')
             .eq('account_id', accountId)
@@ -258,7 +275,7 @@ export class BudgetingEngine {
             .lte('date', endDate)
 
         // Transfers TO the CC (positive amount on CC side = payment from checking)
-        const { data: payments } = await supabase
+        const { data: payments } = await this.supabase
             .from('transactions')
             .select('amount')
             .eq('account_id', accountId)
@@ -281,9 +298,7 @@ export class BudgetingEngine {
      * Get a full budget summary for a month with all values computed from transactions.
      */
     async getBudgetSummary(userId: string, month: number, year: number): Promise<BudgetSummary> {
-        const supabase = await createServerSupabaseClient()
-
-        const { data: budget, error } = await supabase
+        const { data: budget, error } = await this.supabase
             .from('budgets')
             .select('id, month, year')
             .eq('user_id', userId)
@@ -296,7 +311,7 @@ export class BudgetingEngine {
         }
 
         // Build a map of payment_category_id → account_id for all CC accounts
-        const { data: ccAccounts } = await supabase
+        const { data: ccAccounts } = await this.supabase
             .from('accounts')
             .select('id, payment_category_id')
             .eq('user_id', userId)
@@ -309,7 +324,7 @@ export class BudgetingEngine {
             }
         }
 
-        const { data: allocations } = await supabase
+        const { data: allocations } = await this.supabase
             .from('category_allocations')
             .select(`
                 budget_id,

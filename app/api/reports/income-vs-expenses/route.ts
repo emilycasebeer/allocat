@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createAuthenticatedSupabaseClient } from '@/lib/supabase'
 import { requireAuth } from '@/lib/auth'
 import type { Database } from '@/lib/database.types'
 
@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
         const { searchParams } = new URL(request.url)
         const months = Number(searchParams.get('months') || 3)
 
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
 
         const endDate = new Date()
         const startDate = new Date()

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createAuthenticatedSupabaseClient } from '@/lib/supabase'
 import { BudgetingEngine } from '@/lib/budgeting'
 
 const createErrorResponse = (message: string, status: number) =>
@@ -9,7 +9,7 @@ const createErrorResponse = (message: string, status: number) =>
 export async function POST(request: NextRequest) {
     try {
         const user = await requireAuth(request)
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
         const body = await request.json()
 
         const { budget_id, category_id, amount } = body
@@ -43,8 +43,8 @@ export async function POST(request: NextRequest) {
         }
 
         const newAmount = parseFloat(amount)
-        if (isNaN(newAmount) || newAmount < 0) {
-            return createErrorResponse('amount must be a non-negative number', 400)
+        if (isNaN(newAmount)) {
+            return createErrorResponse('amount must be a number', 400)
         }
 
         // Upsert the allocation with the new budgeted_amount
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Return the full recomputed budget summary
-        const engine = new BudgetingEngine()
+        const engine = new BudgetingEngine(supabase)
         const budgetSummary = await engine.getBudgetSummary(user.id, budget.month, budget.year)
 
         return NextResponse.json({ budget: budgetSummary })

@@ -11,6 +11,7 @@ import { ScheduledTransactionsView } from '@/app/dashboard/scheduled-transaction
 import { ReportsView } from '@/app/dashboard/reports-view'
 import { Button } from '@/components/ui/button'
 import { ManagePayeesModal } from '@/app/dashboard/manage-payees-modal'
+import { SetupWizard } from '@/app/dashboard/setup-wizard'
 
 export interface Account {
     id: string
@@ -38,20 +39,30 @@ export function Dashboard() {
     const [selectedAccount, setSelectedAccount] = useState<Account | null>(null)
     const [currentView, setCurrentView] = useState<'budget' | 'transactions' | 'scheduled' | 'reports'>('budget')
     const [showManagePayees, setShowManagePayees] = useState(false)
+    const [showWizard, setShowWizard] = useState(false)
+    const [wizardChecked, setWizardChecked] = useState(false)
     const [currentMonth, setCurrentMonth] = useState(() => {
         const now = new Date()
         return { month: now.getMonth() + 1, year: now.getFullYear() }
     })
 
     useEffect(() => {
-        fetchAccounts()
-        fetchCategories()
+        Promise.all([fetchAccounts(), fetchCategories()]).then(([accts, cats]) => {
+            if (
+                accts.length === 0 &&
+                cats.length === 0 &&
+                !localStorage.getItem('allocat_wizard_dismissed')
+            ) {
+                setShowWizard(true)
+            }
+            setWizardChecked(true)
+        })
     }, [])
 
-    const fetchAccounts = async () => {
+    const fetchAccounts = async (): Promise<Account[]> => {
         try {
             const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            if (!session) return []
 
             const response = await fetch('/api/accounts', {
                 headers: { 'Authorization': `Bearer ${session.access_token}` }
@@ -63,16 +74,18 @@ export function Dashboard() {
                 if (accounts.length > 0 && !selectedAccount) {
                     setSelectedAccount(accounts[0])
                 }
+                return accounts
             }
         } catch (error) {
             console.error('Error fetching accounts:', error)
         }
+        return []
     }
 
-    const fetchCategories = async () => {
+    const fetchCategories = async (): Promise<Category[]> => {
         try {
             const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            if (!session) return []
 
             const response = await fetch('/api/categories', {
                 headers: { 'Authorization': `Bearer ${session.access_token}` }
@@ -80,11 +93,14 @@ export function Dashboard() {
 
             if (response.ok) {
                 const { flat } = await response.json()
-                setCategories(flat ?? [])
+                const cats = flat ?? []
+                setCategories(cats)
+                return cats
             }
         } catch (error) {
             console.error('Error fetching categories:', error)
         }
+        return []
     }
 
     const handleAccountSelect = (account: Account) => {
@@ -104,6 +120,28 @@ export function Dashboard() {
                     : { month: prev.month + 1, year: prev.year }
             }
         })
+    }
+
+    const handleWizardComplete = async () => {
+        localStorage.setItem('allocat_wizard_dismissed', 'true')
+        setShowWizard(false)
+        await Promise.all([fetchAccounts(), fetchCategories()])
+    }
+
+    const handleWizardSkip = () => {
+        localStorage.setItem('allocat_wizard_dismissed', 'true')
+        setShowWizard(false)
+    }
+
+    if (!wizardChecked || showWizard) {
+        if (showWizard) {
+            return <SetupWizard onComplete={handleWizardComplete} onSkip={handleWizardSkip} />
+        }
+        return (
+            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+            </div>
+        )
     }
 
     return (
@@ -182,6 +220,7 @@ export function Dashboard() {
                     ) : currentView === 'transactions' ? (
                         <TransactionsView
                             account={selectedAccount}
+                            accounts={accounts}
                             categories={categories}
                             onTransactionAdded={fetchAccounts}
                             currentMonth={currentMonth.month}

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createAuthenticatedSupabaseClient } from '@/lib/supabase'
 import { BudgetingEngine } from '@/lib/budgeting'
 
 const createErrorResponse = (message: string, status: number) =>
@@ -9,7 +9,7 @@ const createErrorResponse = (message: string, status: number) =>
 export async function POST(request: NextRequest) {
     try {
         const user = await requireAuth(request)
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
         const body = await request.json()
 
         const { to_budget_id } = body
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
 
         if (!allocations || allocations.length === 0) {
             // Nothing to copy — return current summary as-is
-            const engine = new BudgetingEngine()
+            const engine = new BudgetingEngine(supabase)
             const budgetSummary = await engine.getBudgetSummary(user.id, toBudget.month, toBudget.year)
             return NextResponse.json({ budget: budgetSummary })
         }
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
             return createErrorResponse(upsertError.message, 500)
         }
 
-        const engine = new BudgetingEngine()
+        const engine = new BudgetingEngine(supabase)
         const budgetSummary = await engine.getBudgetSummary(user.id, toBudget.month, toBudget.year)
 
         return NextResponse.json({ budget: budgetSummary })

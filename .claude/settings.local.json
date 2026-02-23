@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:www.ynab.com)",
+      "WebFetch(domain:pageflows.com)",
+      "WebFetch(domain:builtformars.com)",
+      "WebFetch(domain:goodux.appcues.com)"
+    ]
+  }
+}

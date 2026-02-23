@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server'
 export interface AuthenticatedUser {
     id: string
     email: string
+    accessToken: string
 }
 
 export async function getAuthenticatedUser(request: NextRequest): Promise<AuthenticatedUser | null> {
@@ -24,7 +25,8 @@ export async function getAuthenticatedUser(request: NextRequest): Promise<Authen
 
         return {
             id: user.id,
-            email: user.email!
+            email: user.email!,
+            accessToken: token,
         }
     } catch (error) {
         console.error('Authentication error:', error)

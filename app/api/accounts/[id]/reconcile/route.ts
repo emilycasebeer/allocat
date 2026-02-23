@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createAuthenticatedSupabaseClient } from '@/lib/supabase'
 import Decimal from 'decimal.js'
 
 const createErrorResponse = (message: string, status: number) =>
@@ -12,7 +12,7 @@ export async function POST(
 ) {
     try {
         const user = await requireAuth(request)
-        const supabase = await createServerSupabaseClient()
+        const supabase = createAuthenticatedSupabaseClient(user.accessToken)
         const { id: accountId } = await params
         const body = await request.json()
 

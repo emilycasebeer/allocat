@@ -34,17 +34,20 @@ interface Transaction {
     group_name: string | null
     is_split: boolean
     splits: SplitRow[]
+    transfer_transaction_id: string | null
+    to_account_id: string | null
 }
 
 interface TransactionsViewProps {
     account: Account | null
+    accounts: Account[]
     categories: Category[]
     onTransactionAdded: () => void
     currentMonth?: number
     currentYear?: number
 }
 
-export function TransactionsView({ account, categories, onTransactionAdded, currentMonth, currentYear }: TransactionsViewProps) {
+export function TransactionsView({ account, accounts, categories, onTransactionAdded, currentMonth, currentYear }: TransactionsViewProps) {
     const [transactions, setTransactions] = useState<Transaction[]>([])
     const [loading, setLoading] = useState(true)
     const [showAddTransaction, setShowAddTransaction] = useState(false)
@@ -359,6 +362,10 @@ export function TransactionsView({ account, categories, onTransactionAdded, curr
                                                                     : <ChevronRight className="h-3.5 w-3.5" />}
                                                                 Split ({transaction.splits.length})
                                                             </button>
+                                                        ) : transaction.type === 'transfer' ? (
+                                                            <span className="text-blue-600">
+                                                                Transfer → {accounts.find(a => a.id === transaction.to_account_id)?.name ?? 'Other Account'}
+                                                            </span>
                                                         ) : transaction.category_name
                                                             ? `${transaction.group_name} — ${transaction.category_name}`
                                                             : <span className="text-gray-400 italic">Uncategorized</span>}
@@ -389,6 +396,8 @@ export function TransactionsView({ account, categories, onTransactionAdded, curr
                                                                     cleared: transaction.cleared,
                                                                     is_split: transaction.is_split,
                                                                     splits: transaction.splits,
+                                                                    transfer_transaction_id: transaction.transfer_transaction_id,
+                                                                    to_account_id: transaction.to_account_id,
                                                                 })}
                                                             >
                                                                 <Pencil className="h-3.5 w-3.5" />
@@ -441,6 +450,7 @@ export function TransactionsView({ account, categories, onTransactionAdded, curr
                     }
                 }}
                 account={account}
+                accounts={accounts}
                 categories={categories}
                 onTransactionAdded={handleTransactionAdded}
                 editing={editing}
