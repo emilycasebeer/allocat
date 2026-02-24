@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -94,37 +94,88 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
     const [copyingLastMonth, setCopyingLastMonth] = useState(false)
     const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
 
-    useEffect(() => {
-        fetchBudgetSummary()
-    }, [month, year, refreshKey])
+    // Cache: key = "YYYY-M", value = BudgetSummary
+    const cache = useRef<Map<string, BudgetSummary>>(new Map())
+    // Track which month is currently "wanted" so stale background fetches don't clobber UI
+    const activeKey = useRef(`${year}-${month}`)
+    const prevRefreshKey = useRef(refreshKey)
 
-    const fetchBudgetSummary = async () => {
-        setLoading(true)
+    const cacheKey = (m: number, y: number) => `${y}-${m}`
+
+    const fetchMonth = useCallback(async (m: number, y: number, background: boolean) => {
+        const key = cacheKey(m, y)
         try {
             const { data: { session } } = await supabase.auth.getSession()
             if (!session) return
             const headers = { 'Authorization': `Bearer ${session.access_token}` }
-            const response = await fetch(`/api/budgets?month=${month}&year=${year}`, { headers })
-            if (response.ok) {
-                const { budget } = await response.json()
-                setBudgetSummary(budget)
-            } else if (response.status === 404) {
-                const createResponse = await fetch('/api/budgets', {
+            let response = await fetch(`/api/budgets?month=${m}&year=${y}`, { headers })
+            if (response.status === 404) {
+                response = await fetch('/api/budgets', {
                     method: 'POST',
                     headers: { ...headers, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ month, year }),
+                    body: JSON.stringify({ month: m, year: y }),
                 })
-                if (createResponse.ok) {
-                    const { budget } = await createResponse.json()
+            }
+            if (response.ok) {
+                const { budget } = await response.json()
+                cache.current.set(key, budget)
+                // Only update UI if this is still the active month
+                if (key === activeKey.current) {
                     setBudgetSummary(budget)
+                    if (!background) setLoading(false)
                 }
             }
         } catch (error) {
-            console.error('Error fetching budget:', error)
+            if (!background) console.error('Error fetching budget:', error)
         } finally {
-            setLoading(false)
+            if (!background && key === activeKey.current) setLoading(false)
         }
-    }
+    }, [])
+
+    const prefetchAdjacent = useCallback((m: number, y: number) => {
+        const pairs: [number, number][] = [
+            m === 1  ? [12, y - 1] : [m - 1, y],
+            m === 12 ? [1,  y + 1] : [m + 1, y],
+        ]
+        for (const [am, ay] of pairs) {
+            if (!cache.current.has(cacheKey(am, ay))) {
+                fetchMonth(am, ay, true)
+            }
+        }
+    }, [fetchMonth])
+
+    // Fetch or show from cache when month/year/refreshKey changes
+    useEffect(() => {
+        const key = cacheKey(month, year)
+        activeKey.current = key
+
+        // If refreshKey changed, drop all cached data (balances may have changed)
+        if (refreshKey !== prevRefreshKey.current) {
+            cache.current.clear()
+            prevRefreshKey.current = refreshKey
+        }
+
+        const cached = cache.current.get(key)
+        if (cached) {
+            // Instant display from cache
+            setBudgetSummary(cached)
+            setLoading(false)
+            // Silent background refresh to stay current
+            fetchMonth(month, year, true)
+        } else {
+            setLoading(true)
+            fetchMonth(month, year, false)
+        }
+
+        prefetchAdjacent(month, year)
+    }, [month, year, refreshKey, fetchMonth, prefetchAdjacent])
+
+    // Keep fetchBudgetSummary for internal use (rename/delete/copy-last-month flows)
+    const fetchBudgetSummary = useCallback(() => {
+        cache.current.delete(cacheKey(month, year))
+        setLoading(true)
+        fetchMonth(month, year, false)
+    }, [month, year, fetchMonth])
 
     const handleBudgetEdit = (categoryId: string, currentValue: number) => {
         setEditingCell(categoryId)
@@ -169,6 +220,7 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
             })
             if (response.ok) {
                 const { budget } = await response.json()
+                cache.current.set(cacheKey(month, year), budget)
                 setBudgetSummary(budget)
             } else {
                 setBudgetSummary(prevSummary)
@@ -192,6 +244,7 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
             })
             if (response.ok) {
                 const { budget } = await response.json()
+                cache.current.set(cacheKey(month, year), budget)
                 setBudgetSummary(budget)
             } else {
                 const err = await response.json()

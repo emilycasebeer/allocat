@@ -22,6 +22,8 @@ import {
 } from '@/components/ui/select'
 import { Plus, Trash2, Split } from 'lucide-react'
 import type { Account, Category } from '@/app/dashboard/dashboard'
+import { PayeeCombobox } from '@/app/dashboard/payee-combobox'
+import type { PayeeMeta } from '@/app/dashboard/payee-combobox'
 
 export interface EditingTransaction {
     id: string
@@ -324,25 +326,28 @@ export function AddTransactionModal({
 
                     <div className="space-y-2">
                         <Label htmlFor="payee">Payee</Label>
-                        <Input
-                            id="payee"
-                            list="payee-suggestions"
-                            placeholder="e.g., Amazon, Whole Foods"
+                        <PayeeCombobox
+                            payees={payees}
+                            accounts={accounts}
+                            currentAccountId={account.id}
                             value={payeeName}
-                            onChange={(e) => {
-                                const val = e.target.value
-                                setPayeeName(val)
-                                const match = payees.find(p => p.name.toLowerCase() === val.toLowerCase())
-                                if (match?.default_category_id && !categoryId) {
-                                    setCategoryId(match.default_category_id)
+                            onChange={(val, meta: PayeeMeta) => {
+                                if (meta.isTransfer && meta.accountId) {
+                                    setPayeeName(val)
+                                    setType('transfer')
+                                    setToAccountId(meta.accountId)
+                                    setCategoryId('')
+                                    setSplitMode(false)
+                                } else if (val === '') {
+                                    setPayeeName('')
+                                } else {
+                                    setPayeeName(val)
+                                    if (meta.defaultCategoryId !== undefined) {
+                                        setCategoryId(meta.defaultCategoryId ?? '')
+                                    }
                                 }
                             }}
                         />
-                        <datalist id="payee-suggestions">
-                            {payees.map((p) => (
-                                <option key={p.id} value={p.name} />
-                            ))}
-                        </datalist>
                     </div>
 
                     <div className="space-y-2">

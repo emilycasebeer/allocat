@@ -143,6 +143,17 @@ export async function POST(request: NextRequest) {
             }
         }
 
+        // Auto-update payee's default category (fire-and-forget)
+        if (payee_id && category_id) {
+            supabase
+                .from('payees')
+                .update({ default_category_id: category_id })
+                .eq('id', payee_id)
+                .eq('user_id', user.id)
+                .then(() => {})
+                .catch(() => {})
+        }
+
         const isSplit = Array.isArray(splits) && splits.length > 0
 
         const { data: transaction, error } = await supabase

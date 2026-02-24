@@ -57,6 +57,18 @@ export async function PATCH(
             }
         }
 
+        // Auto-update payee's default category (fire-and-forget)
+        const resolvedCategoryId = body.category_id
+        if (payee_id && resolvedCategoryId) {
+            supabase
+                .from('payees')
+                .update({ default_category_id: resolvedCategoryId })
+                .eq('id', payee_id)
+                .eq('user_id', user.id)
+                .then(() => {})
+                .catch(() => {})
+        }
+
         const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() }
         if (amount !== undefined) updatePayload.amount = parseFloat(amount)
         if (date !== undefined) updatePayload.date = date

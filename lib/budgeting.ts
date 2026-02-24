@@ -60,7 +60,8 @@ export class BudgetingEngine {
         categoryId: string,
         month: number,
         year: number,
-        userId: string
+        userId: string,
+        carryNegative = false
     ): Promise<number> {
         // Build a list of up to 24 months going back from the target month (inclusive), oldest first
         const months: { month: number; year: number }[] = []
@@ -111,7 +112,7 @@ export class BudgetingEngine {
 
             const budgeted = new Decimal(allocationMap.get(budgetId) ?? 0)
             const activity = new Decimal(await this.computeActivity(categoryId, mo, yr))
-            const rollover = available.isPositive() ? available : new Decimal(0)
+            const rollover = (carryNegative || available.isPositive()) ? available : new Decimal(0)
             available = rollover.plus(budgeted).plus(activity)
         }
 
@@ -198,12 +199,19 @@ export class BudgetingEngine {
      * Charges = categorized expenses on the CC account (top-level + split children).
      * Payments = transfers TO the CC account (positive amounts on the CC side).
      */
-    private async computeCCActivity(accountId: string, month: number, year: number): Promise<number> {
+    private async computeCCActivity(
+        accountId: string,
+        month: number,
+        year: number,
+        paymentCategoryId?: string
+    ): Promise<number> {
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`
         const endDate = new Date(year, month, 0).toISOString().split('T')[0]
 
-        // Top-level categorized expenses (excludes split parents whose category_id is null)
-        const { data: topLevel } = await this.supabase
+        // Top-level categorized expenses — exclude transactions assigned to the payment
+        // category itself (e.g. starting balance), since those represent pre-existing debt
+        // already reflected in activity, not new charges that need auto-crediting.
+        let topLevelQuery = this.supabase
             .from('transactions')
             .select('amount')
             .eq('account_id', accountId)
@@ -212,9 +220,13 @@ export class BudgetingEngine {
             .gte('date', startDate)
             .lte('date', endDate)
             .is('parent_transaction_id', null)
+        if (paymentCategoryId) {
+            topLevelQuery = topLevelQuery.neq('category_id', paymentCategoryId)
+        }
+        const { data: topLevel } = await topLevelQuery
 
-        // Split children on this CC account (parent_transaction_id IS NOT NULL, have category_id)
-        const { data: splitChildren } = await this.supabase
+        // Split children on this CC account
+        let splitQuery = this.supabase
             .from('transactions')
             .select('amount')
             .eq('account_id', accountId)
@@ -223,6 +235,10 @@ export class BudgetingEngine {
             .not('parent_transaction_id', 'is', null)
             .gte('date', startDate)
             .lte('date', endDate)
+        if (paymentCategoryId) {
+            splitQuery = splitQuery.neq('category_id', paymentCategoryId)
+        }
+        const { data: splitChildren } = await splitQuery
 
         // Transfers TO the CC (positive amount on CC side = payment from checking)
         const { data: payments } = await this.supabase
@@ -295,12 +311,17 @@ export class BudgetingEngine {
         for (const alloc of allocations ?? []) {
             const cat = alloc.categories as any
             const activity = await this.computeActivity(alloc.category_id, month, year)
-            let available = await this.computeAvailable(alloc.category_id, month, year, userId)
-
-            // Auto-credit CC payment categories with the sum of categorized CC charges this month
             const ccAccountId = ccPaymentMap.get(alloc.category_id)
+            // CC payment categories carry negative balances forward (real debt persists month-to-month)
+            let available = await this.computeAvailable(
+                alloc.category_id, month, year, userId, ccAccountId !== undefined
+            )
+
+            // Auto-credit CC payment categories with categorized CC charges this month
             if (ccAccountId) {
-                const ccActivity = await this.computeCCActivity(ccAccountId, month, year)
+                const ccActivity = await this.computeCCActivity(
+                    ccAccountId, month, year, alloc.category_id
+                )
                 available = new Decimal(available).plus(ccActivity).toNumber()
             }
 
