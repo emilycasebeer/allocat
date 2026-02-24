@@ -4,48 +4,27 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222.2 84% 4.9%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222.2 84% 4.9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 84% 4.9%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 94.1%;
+    /* Midnight Ledger — dark theme */
+    --background: 222 22% 8%;
+    --foreground: 210 25% 92%;
+    --card: 222 20% 11%;
+    --card-foreground: 210 25% 92%;
+    --popover: 222 18% 13%;
+    --popover-foreground: 210 25% 92%;
+    --primary: 160 72% 40%;
+    --primary-foreground: 222 22% 8%;
+    --secondary: 222 18% 15%;
+    --secondary-foreground: 210 20% 85%;
+    --muted: 222 16% 18%;
+    --muted-foreground: 215 12% 56%;
+    --accent: 38 90% 50%;
+    --accent-foreground: 222 22% 8%;
+    --destructive: 350 80% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 222 14% 22%;
+    --input: 222 16% 14%;
+    --ring: 160 72% 40%;
+    --radius: 0.375rem;
   }
 }
 
@@ -55,63 +34,103 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-dm-sans), system-ui, sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
 @layer components {
+  /* ── Budget Table ──────────────────────────────────────── */
   .budget-table {
     @apply w-full border-collapse;
   }
-  
+
   .budget-table th {
-    @apply bg-gray-50 text-left p-3 border-b border-gray-200 font-medium text-gray-700;
+    @apply p-3 text-xs font-semibold uppercase tracking-wider;
+    color: hsl(var(--muted-foreground));
+    background-color: hsl(var(--secondary));
+    border-bottom: 1px solid hsl(var(--border));
   }
-  
+
   .budget-table td {
-    @apply p-3 border-b border-gray-100;
+    @apply p-3;
+    border-bottom: 1px solid hsl(var(--border) / 0.5);
   }
-  
-  .budget-table tr:hover {
-    @apply bg-gray-50;
+
+  .budget-table tbody tr:hover td {
+    background-color: hsl(var(--muted) / 0.4);
   }
-  
-  .category-group {
-    @apply bg-gray-100 font-semibold text-gray-800;
+
+  .category-group td {
+    background-color: hsl(var(--secondary));
+    color: hsl(var(--foreground));
+    border-bottom: 1px solid hsl(var(--border));
+    @apply font-semibold text-sm;
   }
-  
+
   .category-name {
-    @apply pl-6;
+    @apply pl-8;
   }
-  
+
   .budgeted-input {
-    @apply w-24 px-2 py-1 border border-gray-300 rounded text-right focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent;
+    @apply w-28 px-2 py-1 rounded text-right text-sm focus:outline-none focus:ring-2;
+    font-family: var(--font-dm-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    background-color: hsl(var(--muted));
+    border: 1px solid hsl(var(--border));
+    color: hsl(var(--foreground));
+    --tw-ring-color: hsl(var(--primary));
   }
-  
+
+  /* ── Amount text ───────────────────────────────────────── */
   .amount-positive {
-    @apply text-green-600 font-medium;
+    color: hsl(160 72% 52%);
+    @apply font-medium;
+    font-family: var(--font-dm-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
   }
-  
+
   .amount-negative {
-    @apply text-red-600 font-medium;
+    color: hsl(350 80% 65%);
+    @apply font-medium;
+    font-family: var(--font-dm-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
   }
-  
+
+  /* ── Available column badges ───────────────────────────── */
   .available-positive {
-    @apply text-green-600 font-semibold;
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
+    font-family: var(--font-dm-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    background-color: hsl(160 72% 40% / 0.15);
+    color: hsl(160 72% 58%);
   }
-  
+
   .available-zero {
-    @apply text-yellow-600 font-semibold;
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
+    font-family: var(--font-dm-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    background-color: hsl(38 90% 50% / 0.15);
+    color: hsl(38 90% 65%);
   }
-  
+
   .available-negative {
-    @apply text-red-600 font-semibold;
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
+    font-family: var(--font-dm-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    background-color: hsl(350 80% 60% / 0.15);
+    color: hsl(350 80% 70%);
   }
-  
-  .sidebar-account {
-    @apply flex items-center justify-between p-3 hover:bg-gray-100 cursor-pointer rounded-lg transition-colors;
+
+  /* ── Utility classes ───────────────────────────────────── */
+  .financial-figure {
+    font-family: var(--font-dm-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
   }
-  
-  .sidebar-account.active {
-    @apply bg-blue-50 border-l-4 border-blue-500;
+
+  .font-display {
+    font-family: var(--font-syne), var(--font-dm-sans), system-ui, sans-serif;
   }
 }

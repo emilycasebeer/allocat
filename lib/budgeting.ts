@@ -138,13 +138,19 @@ export class BudgetingEngine {
 
     /**
      * Compute To Be Budgeted for a given month.
-     * TBB = max(0, TBB_last_month) + income_this_month - total_budgeted_this_month
+     *
+     * YNAB-correct formula: TBB is cumulative — it equals the total of all income
+     * ever received into budget accounts (up to the end of this month) minus the
+     * total of all amounts ever budgeted across all months up to and including
+     * this month.  This is equivalent to the rolling formula
+     *   TBB(M) = TBB(M-1) + income(M) − budgeted(M)
+     * applied recursively all the way back to the beginning, which means prior
+     * months' unbudgeted money always carries forward correctly.
      */
     async computeTBB(userId: string, month: number, year: number): Promise<number> {
-        const startDate = `${year}-${String(month).padStart(2, '0')}-01`
         const endDate = new Date(year, month, 0).toISOString().split('T')[0]
 
-        // Only count income from on-budget accounts
+        // Sum ALL income from on-budget accounts up to the end of this month
         const budgetAccountIds = await this.getBudgetAccountIds(userId)
 
         let totalIncome = 0
@@ -154,7 +160,6 @@ export class BudgetingEngine {
                 .select('amount')
                 .in('account_id', budgetAccountIds)
                 .eq('type', 'income')
-                .gte('date', startDate)
                 .lte('date', endDate)
                 .is('parent_transaction_id', null)
 
@@ -163,82 +168,27 @@ export class BudgetingEngine {
             )
         }
 
-        // Total budgeted across all categories this month
-        const { data: budget } = await this.supabase
+        // Sum ALL budgeted allocations across every budget month up to and including this one
+        const { data: allBudgets } = await this.supabase
             .from('budgets')
-            .select('id')
+            .select('id, month, year')
             .eq('user_id', userId)
-            .eq('month', month)
-            .eq('year', year)
-            .maybeSingle()
+
+        const relevantBudgetIds = (allBudgets ?? [])
+            .filter(b => b.year < year || (b.year === year && b.month <= month))
+            .map(b => b.id)
 
         let totalBudgeted = 0
-        if (budget) {
+        if (relevantBudgetIds.length > 0) {
             const { data: allocations } = await this.supabase
                 .from('category_allocations')
                 .select('budgeted_amount')
-                .eq('budget_id', budget.id)
+                .in('budget_id', relevantBudgetIds)
 
             totalBudgeted = (allocations ?? []).reduce(
-                (sum, a) => new Decimal(sum).plus(a.budgeted_amount).toNumber(),
-                0
+                (sum, a) => new Decimal(sum).plus(a.budgeted_amount).toNumber(), 0
             )
         }
-
-        // Rollover from last month (positive TBB only)
-        const prevMonth = month === 1 ? 12 : month - 1
-        const prevYear = month === 1 ? year - 1 : year
-        const prevTBB = await this.computeTBBRaw(userId, prevMonth, prevYear)
-        const rollover = prevTBB > 0 ? prevTBB : 0
-
-        return new Decimal(rollover).plus(totalIncome).minus(totalBudgeted).toNumber()
-    }
-
-    /**
-     * Compute TBB for a month without rollover. Used only to get the prior month's
-     * TBB for the rollover calculation, avoiding infinite recursion.
-     */
-    private async computeTBBRaw(userId: string, month: number, year: number): Promise<number> {
-        const startDate = `${year}-${String(month).padStart(2, '0')}-01`
-        const endDate = new Date(year, month, 0).toISOString().split('T')[0]
-
-        const budgetAccountIds = await this.getBudgetAccountIds(userId)
-
-        let totalIncome = 0
-        if (budgetAccountIds.length > 0) {
-            const { data: incomeData } = await this.supabase
-                .from('transactions')
-                .select('amount')
-                .in('account_id', budgetAccountIds)
-                .eq('type', 'income')
-                .gte('date', startDate)
-                .lte('date', endDate)
-                .is('parent_transaction_id', null)
-
-            totalIncome = (incomeData ?? []).reduce(
-                (sum, t) => new Decimal(sum).plus(t.amount).toNumber(), 0
-            )
-        }
-
-        const { data: budget } = await this.supabase
-            .from('budgets')
-            .select('id')
-            .eq('user_id', userId)
-            .eq('month', month)
-            .eq('year', year)
-            .maybeSingle()
-
-        if (!budget) return totalIncome
-
-        const { data: allocations } = await this.supabase
-            .from('category_allocations')
-            .select('budgeted_amount')
-            .eq('budget_id', budget.id)
-
-        const totalBudgeted = (allocations ?? []).reduce(
-            (sum, a) => new Decimal(sum).plus(a.budgeted_amount).toNumber(),
-            0
-        )
 
         return new Decimal(totalIncome).minus(totalBudgeted).toNumber()
     }

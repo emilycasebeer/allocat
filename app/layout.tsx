@@ -1,13 +1,30 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Syne, DM_Sans, DM_Mono } from 'next/font/google'
 import './globals.css'
 import { Providers } from '@/app/providers'
 
-const inter = Inter({ subsets: ['latin'] })
+const syne = Syne({
+    subsets: ['latin'],
+    variable: '--font-syne',
+    display: 'swap',
+})
+
+const dmSans = DM_Sans({
+    subsets: ['latin'],
+    variable: '--font-dm-sans',
+    display: 'swap',
+})
+
+const dmMono = DM_Mono({
+    subsets: ['latin'],
+    weight: ['400', '500'],
+    variable: '--font-dm-mono',
+    display: 'swap',
+})
 
 export const metadata: Metadata = {
-    title: 'Allocat - YNAB-Style Budgeting',
-    description: 'A comprehensive budgeting app built with Next.js and Supabase',
+    title: 'Allocat — Budget with clarity',
+    description: 'A modern YNAB-style budgeting app built with Next.js and Supabase',
 }
 
 export default function RootLayout({
@@ -16,8 +33,12 @@ export default function RootLayout({
     children: React.ReactNode
 }) {
     return (
-        <html lang="en" suppressHydrationWarning>
-            <body className={inter.className}>
+        <html
+            lang="en"
+            className={`dark ${syne.variable} ${dmSans.variable} ${dmMono.variable}`}
+            suppressHydrationWarning
+        >
+            <body>
                 <Providers>
                     {children}
                 </Providers>

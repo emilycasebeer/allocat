@@ -5,7 +5,10 @@
       "WebFetch(domain:www.ynab.com)",
       "WebFetch(domain:pageflows.com)",
       "WebFetch(domain:builtformars.com)",
-      "WebFetch(domain:goodux.appcues.com)"
+      "WebFetch(domain:goodux.appcues.com)",
+      "Bash(head:*)",
+      "Bash(grep:*)",
+      "Bash(tail:*)"
     ]
   }
 }

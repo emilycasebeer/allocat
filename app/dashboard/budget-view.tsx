@@ -5,7 +5,7 @@ import { supabase } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, Target, Pencil, Trash2, ArrowLeftRight, Copy } from 'lucide-react'
+import { Plus, Target, Pencil, Trash2, ArrowLeftRight, Copy, ChevronDown, ChevronRight } from 'lucide-react'
 import { AddCategoryModal } from '@/app/dashboard/add-category-modal'
 import { SetGoalModal } from '@/app/dashboard/set-goal-modal'
 import { MoveMoneyModal } from '@/app/dashboard/move-money-modal'
@@ -35,21 +35,18 @@ interface BudgetViewProps {
     year: number
     categories: Category[]
     onCategoryAdded: () => void
+    refreshKey?: number
 }
 
 function GoalProgress({ goal, available }: { goal: CategoryGoal; available: number }) {
     let target: number | null = null
-    let label = ''
 
     if (goal.goal_type === 'monthly_savings' || goal.goal_type === 'monthly_spending') {
         target = goal.monthly_amount
-        label = goal.goal_type === 'monthly_savings' ? 'Monthly Savings' : 'Monthly Budget'
     } else if (goal.goal_type === 'target_balance' || goal.goal_type === 'debt_payoff') {
         target = goal.target_amount
-        label = goal.goal_type === 'debt_payoff' ? 'Debt Payoff' : 'Target Balance'
     } else if (goal.goal_type === 'target_balance_by_date') {
         target = goal.target_amount
-        label = goal.target_date ? `Goal by ${goal.target_date}` : 'Target Balance'
     }
 
     if (!target || target <= 0) return null
@@ -58,15 +55,19 @@ function GoalProgress({ goal, available }: { goal: CategoryGoal; available: numb
     const isComplete = pct >= 100
 
     return (
-        <div className="mt-1">
-            <div className="flex items-center justify-between text-xs text-gray-500 mb-0.5">
-                <span>{label}</span>
-                <span>{Math.round(pct)}%</span>
-            </div>
-            <div className="h-1 w-full bg-gray-200 rounded-full overflow-hidden">
+        <div className="mt-1.5">
+            <div
+                className="h-1 w-full rounded-full overflow-hidden"
+                style={{ backgroundColor: 'hsl(var(--muted))' }}
+            >
                 <div
-                    className={`h-full rounded-full transition-all ${isComplete ? 'bg-green-500' : 'bg-blue-400'}`}
-                    style={{ width: `${pct}%` }}
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                        width: `${pct}%`,
+                        backgroundColor: isComplete
+                            ? 'hsl(160 72% 40%)'
+                            : 'hsl(38 90% 50%)',
+                    }}
                 />
             </div>
         </div>
@@ -74,11 +75,14 @@ function GoalProgress({ goal, available }: { goal: CategoryGoal; available: numb
 }
 
 const formatCurrency = (amount: number) => {
-    const abs = Math.abs(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const abs = Math.abs(amount).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    })
     return amount < 0 ? `-$${abs}` : `$${abs}`
 }
 
-export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
+export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetViewProps) {
     const [budgetSummary, setBudgetSummary] = useState<BudgetSummary | null>(null)
     const [loading, setLoading] = useState(true)
     const [editingCell, setEditingCell] = useState<string | null>(null)
@@ -88,20 +92,19 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
     const [renamingCategory, setRenamingCategory] = useState<{ id: string; name: string } | null>(null)
     const [showMoveMoney, setShowMoveMoney] = useState(false)
     const [copyingLastMonth, setCopyingLastMonth] = useState(false)
+    const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
 
     useEffect(() => {
         fetchBudgetSummary()
-    }, [month, year])
+    }, [month, year, refreshKey])
 
     const fetchBudgetSummary = async () => {
         setLoading(true)
         try {
             const { data: { session } } = await supabase.auth.getSession()
             if (!session) return
-
             const headers = { 'Authorization': `Bearer ${session.access_token}` }
             const response = await fetch(`/api/budgets?month=${month}&year=${year}`, { headers })
-
             if (response.ok) {
                 const { budget } = await response.json()
                 setBudgetSummary(budget)
@@ -109,7 +112,7 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
                 const createResponse = await fetch('/api/budgets', {
                     method: 'POST',
                     headers: { ...headers, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ month, year })
+                    body: JSON.stringify({ month, year }),
                 })
                 if (createResponse.ok) {
                     const { budget } = await createResponse.json()
@@ -130,25 +133,49 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
 
     const handleBudgetSave = async (categoryId: string) => {
         if (!budgetSummary) return
+        const newAmount = parseFloat(editingValue) || 0
+        const cat = budgetSummary.categories.find(c => c.id === categoryId)
+        if (!cat) return
+        const diff = newAmount - cat.budgeted_amount
+        const prevSummary = budgetSummary
+
+        // Optimistic update — instant UI
+        setBudgetSummary(prev => {
+            if (!prev) return prev
+            return {
+                ...prev,
+                to_be_budgeted: prev.to_be_budgeted - diff,
+                categories: prev.categories.map(c =>
+                    c.id === categoryId
+                        ? { ...c, budgeted_amount: newAmount, available_amount: c.available_amount + diff }
+                        : c
+                ),
+            }
+        })
+        setEditingCell(null)
+        setEditingValue('')
+
+        // Background sync
         try {
             const { data: { session } } = await supabase.auth.getSession()
             if (!session) return
-
-            const newAmount = parseFloat(editingValue) || 0
             const response = await fetch('/api/budgets/allocate', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-                body: JSON.stringify({ budget_id: budgetSummary.id, category_id: categoryId, amount: newAmount })
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify({ budget_id: budgetSummary.id, category_id: categoryId, amount: newAmount }),
             })
             if (response.ok) {
                 const { budget } = await response.json()
                 setBudgetSummary(budget)
+            } else {
+                setBudgetSummary(prevSummary)
             }
         } catch (error) {
             console.error('Error updating budget:', error)
-        } finally {
-            setEditingCell(null)
-            setEditingValue('')
+            setBudgetSummary(prevSummary)
         }
     }
 
@@ -161,7 +188,7 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
             const response = await fetch('/api/budgets/copy', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-                body: JSON.stringify({ to_budget_id: budgetSummary.id })
+                body: JSON.stringify({ to_budget_id: budgetSummary.id }),
             })
             if (response.ok) {
                 const { budget } = await response.json()
@@ -191,10 +218,10 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
             const response = await fetch(`/api/categories/${categoryId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-                body: JSON.stringify({ name: trimmed })
+                body: JSON.stringify({ name: trimmed }),
             })
             if (response.ok) {
-                onCategoryAdded() // refresh dashboard categories
+                onCategoryAdded()
                 fetchBudgetSummary()
             } else {
                 const err = await response.json()
@@ -214,7 +241,7 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
             if (!session) return
             const response = await fetch(`/api/categories/${category.id}`, {
                 method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${session.access_token}` }
+                headers: { 'Authorization': `Bearer ${session.access_token}` },
             })
             if (response.ok) {
                 onCategoryAdded()
@@ -228,6 +255,15 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
         }
     }
 
+    const toggleGroup = (groupName: string) => {
+        setCollapsedGroups(prev => {
+            const next = new Set(prev)
+            if (next.has(groupName)) next.delete(groupName)
+            else next.add(groupName)
+            return next
+        })
+    }
+
     const getAvailableClass = (available: number) => {
         if (available > 0) return 'available-positive'
         if (available === 0) return 'available-zero'
@@ -237,7 +273,10 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
     if (loading) {
         return (
             <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <div className="flex flex-col items-center gap-3">
+                    <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                    <span className="text-sm text-muted-foreground">Loading budget…</span>
+                </div>
             </div>
         )
     }
@@ -245,7 +284,7 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
     if (!budgetSummary) {
         return (
             <div className="text-center py-12">
-                <p className="text-gray-500">No budget found for this month.</p>
+                <p className="text-muted-foreground">No budget found for this month.</p>
                 <Button onClick={fetchBudgetSummary} className="mt-4">Retry</Button>
             </div>
         )
@@ -261,149 +300,240 @@ export function BudgetView({ month, year, onCategoryAdded }: BudgetViewProps) {
         return groups
     }, {} as Record<string, BudgetCategory[]>)
 
+    const tbbPositive = budgetSummary.to_be_budgeted >= 0
+
     return (
-        <div className="space-y-6">
-            {/* To Be Budgeted */}
-            <Card className="bg-gradient-to-r from-blue-50 to-blue-100 border-blue-200">
-                <CardHeader>
-                    <CardTitle className="text-blue-900">To Be Budgeted</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <div className={`text-4xl font-bold ${budgetSummary.to_be_budgeted >= 0 ? 'text-blue-900' : 'text-red-700'}`}>
+        <div className="space-y-5">
+            {/* ── To Be Budgeted Hero ──────────────────────────────────── */}
+            <div className="grid grid-cols-4 gap-3">
+                {/* Ready to Assign — main card */}
+                <div
+                    className="rounded-xl border p-5"
+                    style={{
+                        borderColor: tbbPositive ? 'hsl(38 90% 50% / 0.3)' : 'hsl(350 80% 60% / 0.3)',
+                        background: tbbPositive
+                            ? 'linear-gradient(135deg, hsl(222 20% 11%), hsl(38 90% 50% / 0.06))'
+                            : 'linear-gradient(135deg, hsl(222 20% 11%), hsl(350 80% 60% / 0.06))',
+                    }}
+                >
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
+                        Ready to Assign
+                    </p>
+                    <div
+                        className="font-display text-4xl font-bold financial-figure leading-none"
+                        style={{ color: tbbPositive ? 'hsl(38 90% 58%)' : 'hsl(350 80% 65%)' }}
+                    >
                         {formatCurrency(budgetSummary.to_be_budgeted)}
                     </div>
-                </CardContent>
-            </Card>
+                </div>
 
-            {/* Budget Table */}
+                {/* Budgeted */}
+                <div className="rounded-xl border p-5 bg-card/40">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">Budgeted</p>
+                    <div className="font-display text-2xl font-bold financial-figure text-foreground/80 leading-none">
+                        {formatCurrency(totalBudgeted)}
+                    </div>
+                </div>
+
+                {/* Activity */}
+                <div className="rounded-xl border p-5 bg-card/40">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">Activity</p>
+                    <div className={`font-display text-2xl font-bold financial-figure leading-none ${totalActivity < 0 ? 'text-destructive/80' : 'text-primary/80'}`}>
+                        {formatCurrency(totalActivity)}
+                    </div>
+                </div>
+
+                {/* Available */}
+                <div className="rounded-xl border p-5 bg-card/40">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">Available</p>
+                    <div className={`font-display text-2xl font-bold financial-figure leading-none ${totalAvailable > 0 ? 'text-primary/80' : totalAvailable < 0 ? 'text-destructive/80' : 'text-muted-foreground'}`}>
+                        {formatCurrency(totalAvailable)}
+                    </div>
+                </div>
+            </div>
+
+            {/* ── Budget Table ─────────────────────────────────────────── */}
             <Card>
-                <CardHeader>
+                <CardHeader className="pb-0">
                     <div className="flex items-center justify-between">
-                        <CardTitle>Budget Categories</CardTitle>
+                        <CardTitle className="text-base font-semibold">Categories</CardTitle>
                         <div className="flex items-center gap-2">
-                            <Button variant="outline" size="sm" onClick={() => setShowMoveMoney(true)}>
-                                <ArrowLeftRight className="h-4 w-4 mr-1" />
+                            <Button variant="ghost" size="sm" onClick={() => setShowMoveMoney(true)} className="text-muted-foreground hover:text-foreground h-8 px-3">
+                                <ArrowLeftRight className="h-3.5 w-3.5 mr-1.5" />
                                 Move Money
                             </Button>
-                            <Button variant="outline" size="sm" onClick={handleCopyLastMonth} disabled={copyingLastMonth}>
-                                <Copy className="h-4 w-4 mr-1" />
-                                {copyingLastMonth ? 'Copying...' : 'Copy Last Month'}
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleCopyLastMonth}
+                                disabled={copyingLastMonth}
+                                className="text-muted-foreground hover:text-foreground h-8 px-3"
+                            >
+                                <Copy className="h-3.5 w-3.5 mr-1.5" />
+                                {copyingLastMonth ? 'Copying…' : 'Copy Last Month'}
                             </Button>
-                            <Button onClick={() => setShowAddCategory(true)} size="sm">
-                                <Plus className="h-4 w-4 mr-2" />
+                            <Button
+                                size="sm"
+                                onClick={() => setShowAddCategory(true)}
+                                className="h-8 px-3"
+                            >
+                                <Plus className="h-3.5 w-3.5 mr-1.5" />
                                 Add Category
                             </Button>
                         </div>
                     </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="p-0 mt-4">
                     <div className="overflow-x-auto">
                         <table className="budget-table">
                             <thead>
                                 <tr>
-                                    <th className="w-1/3">Category</th>
-                                    <th className="w-1/6 text-right">Budgeted</th>
-                                    <th className="w-1/6 text-right">Activity</th>
-                                    <th className="w-1/6 text-right">Available</th>
+                                    <th className="w-2/5 pl-4">Category</th>
+                                    <th className="w-1/5 text-right">Budgeted</th>
+                                    <th className="w-1/5 text-right">Activity</th>
+                                    <th className="w-1/5 text-right pr-4">Available</th>
                                     <th className="w-20"></th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {Object.entries(grouped).map(([groupName, groupCategories]) => (
-                                    <React.Fragment key={groupName}>
-                                        <tr className="category-group">
-                                            <td colSpan={5} className="font-semibold">{groupName}</td>
-                                        </tr>
-                                        {groupCategories.map((category) => (
-                                            <tr key={category.id} className="group">
-                                                <td className="category-name">
-                                                    {renamingCategory?.id === category.id ? (
-                                                        <Input
-                                                            value={renamingCategory.name}
-                                                            onChange={(e) => setRenamingCategory({ id: category.id, name: e.target.value })}
-                                                            onKeyDown={(e) => {
-                                                                if (e.key === 'Enter') handleRenameSave(category.id, renamingCategory.name)
-                                                                if (e.key === 'Escape') setRenamingCategory(null)
-                                                            }}
-                                                            onBlur={() => handleRenameSave(category.id, renamingCategory.name)}
-                                                            className="h-7 text-sm py-0"
-                                                            autoFocus
-                                                        />
-                                                    ) : (
-                                                        <div>
-                                                            {category.name}
-                                                            {category.goal && (
-                                                                <GoalProgress
-                                                                    goal={category.goal}
-                                                                    available={category.available_amount}
-                                                                />
-                                                            )}
-                                                        </div>
-                                                    )}
-                                                </td>
-                                                <td className="text-right">
-                                                    {editingCell === category.id ? (
-                                                        <Input
-                                                            type="number"
-                                                            value={editingValue}
-                                                            onChange={(e) => setEditingValue(e.target.value)}
-                                                            onKeyDown={(e) => handleKeyDown(e, category.id)}
-                                                            onBlur={() => handleBudgetSave(category.id)}
-                                                            className="budgeted-input"
-                                                            autoFocus
-                                                        />
-                                                    ) : (
-                                                        <span
-                                                            className="cursor-pointer hover:bg-gray-100 px-2 py-1 rounded"
-                                                            onClick={() => handleBudgetEdit(category.id, category.budgeted_amount)}
-                                                        >
-                                                            {formatCurrency(category.budgeted_amount)}
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className={`text-right ${category.activity_amount < 0 ? 'amount-negative' : 'amount-positive'}`}>
-                                                    {formatCurrency(category.activity_amount)}
-                                                </td>
-                                                <td className={`text-right ${getAvailableClass(category.available_amount)}`}>
-                                                    {formatCurrency(category.available_amount)}
-                                                </td>
-                                                <td className="text-center">
-                                                    <div className="flex items-center justify-center gap-1">
-                                                        <button
-                                                            title="Set Goal"
-                                                            className={`p-1 rounded hover:bg-gray-100 ${category.goal ? 'text-blue-500' : 'text-gray-300'}`}
-                                                            onClick={() => setGoalModal({ categoryId: category.id, categoryName: category.name, goal: category.goal })}
-                                                        >
-                                                            <Target className="h-4 w-4" />
-                                                        </button>
-                                                        <button
-                                                            title="Rename"
-                                                            className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                            onClick={() => setRenamingCategory({ id: category.id, name: category.name })}
-                                                        >
-                                                            <Pencil className="h-3.5 w-3.5" />
-                                                        </button>
-                                                        <button
-                                                            title="Delete"
-                                                            className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                            onClick={() => handleDeleteCategory(category)}
-                                                        >
-                                                            <Trash2 className="h-3.5 w-3.5" />
-                                                        </button>
+                                {Object.entries(grouped).map(([groupName, groupCategories]) => {
+                                    const isCollapsed = collapsedGroups.has(groupName)
+                                    const groupBudgeted = groupCategories.reduce((s, c) => s + c.budgeted_amount, 0)
+                                    const groupActivity = groupCategories.reduce((s, c) => s + c.activity_amount, 0)
+                                    const groupAvailable = groupCategories.reduce((s, c) => s + c.available_amount, 0)
+
+                                    return (
+                                        <React.Fragment key={groupName}>
+                                            {/* Group header row */}
+                                            <tr
+                                                className="category-group cursor-pointer select-none"
+                                                onClick={() => toggleGroup(groupName)}
+                                            >
+                                                <td className="pl-4">
+                                                    <div className="flex items-center gap-2">
+                                                        {isCollapsed
+                                                            ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                                                            : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                                                        }
+                                                        <span>{groupName}</span>
                                                     </div>
                                                 </td>
+                                                <td className="text-right financial-figure text-muted-foreground text-xs">
+                                                    {formatCurrency(groupBudgeted)}
+                                                </td>
+                                                <td className={`text-right financial-figure text-xs ${groupActivity < 0 ? 'text-destructive/70' : 'text-primary/70'}`}>
+                                                    {formatCurrency(groupActivity)}
+                                                </td>
+                                                <td className="text-right pr-4 financial-figure text-xs">
+                                                    <span className={getAvailableClass(groupAvailable)}>
+                                                        {formatCurrency(groupAvailable)}
+                                                    </span>
+                                                </td>
+                                                <td></td>
                                             </tr>
-                                        ))}
-                                    </React.Fragment>
-                                ))}
-                                <tr className="bg-gray-50 font-semibold">
-                                    <td>Total</td>
-                                    <td className="text-right">{formatCurrency(totalBudgeted)}</td>
-                                    <td className={`text-right ${totalActivity < 0 ? 'amount-negative' : 'amount-positive'}`}>
+
+                                            {/* Category rows */}
+                                            {!isCollapsed && groupCategories.map((category) => (
+                                                <tr key={category.id} className="group">
+                                                    <td className="category-name">
+                                                        {renamingCategory?.id === category.id ? (
+                                                            <Input
+                                                                value={renamingCategory.name}
+                                                                onChange={(e) => setRenamingCategory({ id: category.id, name: e.target.value })}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') handleRenameSave(category.id, renamingCategory.name)
+                                                                    if (e.key === 'Escape') setRenamingCategory(null)
+                                                                }}
+                                                                onBlur={() => handleRenameSave(category.id, renamingCategory.name)}
+                                                                className="h-7 text-sm py-0 bg-muted border-border"
+                                                                autoFocus
+                                                            />
+                                                        ) : (
+                                                            <div>
+                                                                <span className="text-sm text-foreground/90">{category.name}</span>
+                                                                {category.goal && (
+                                                                    <GoalProgress
+                                                                        goal={category.goal}
+                                                                        available={category.available_amount}
+                                                                    />
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                    <td className="text-right">
+                                                        {editingCell === category.id ? (
+                                                            <Input
+                                                                type="text"
+                                                                inputMode="decimal"
+                                                                value={editingValue}
+                                                                onChange={(e) => setEditingValue(e.target.value)}
+                                                                onKeyDown={(e) => handleKeyDown(e, category.id)}
+                                                                onBlur={() => handleBudgetSave(category.id)}
+                                                                onFocus={(e) => e.target.select()}
+                                                                className="budgeted-input"
+                                                                autoFocus
+                                                            />
+                                                        ) : (
+                                                            <span
+                                                                className="cursor-pointer hover:bg-muted/60 py-1 rounded text-sm financial-figure text-foreground/80 inline-block"
+                                                                onClick={() => handleBudgetEdit(category.id, category.budgeted_amount)}
+                                                            >
+                                                                {formatCurrency(category.budgeted_amount)}
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className={`text-right text-sm financial-figure ${category.activity_amount < 0 ? 'amount-negative' : 'amount-positive'}`}>
+                                                        {formatCurrency(category.activity_amount)}
+                                                    </td>
+                                                    <td className="text-right pr-4">
+                                                        <span className={getAvailableClass(category.available_amount)}>
+                                                            {formatCurrency(category.available_amount)}
+                                                        </span>
+                                                    </td>
+                                                    <td className="text-center">
+                                                        <div className="flex items-center justify-center gap-0.5">
+                                                            <button
+                                                                title="Set Goal"
+                                                                className={`p-1 rounded hover:bg-muted transition-colors ${category.goal ? 'text-primary' : 'text-muted-foreground/30 hover:text-muted-foreground'}`}
+                                                                onClick={() => setGoalModal({ categoryId: category.id, categoryName: category.name, goal: category.goal })}
+                                                            >
+                                                                <Target className="h-3.5 w-3.5" />
+                                                            </button>
+                                                            <button
+                                                                title="Rename"
+                                                                className="p-1 rounded hover:bg-muted text-muted-foreground/30 hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-all"
+                                                                onClick={() => setRenamingCategory({ id: category.id, name: category.name })}
+                                                            >
+                                                                <Pencil className="h-3.5 w-3.5" />
+                                                            </button>
+                                                            <button
+                                                                title="Delete"
+                                                                className="p-1 rounded hover:bg-destructive/10 text-muted-foreground/30 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
+                                                                onClick={() => handleDeleteCategory(category)}
+                                                            >
+                                                                <Trash2 className="h-3.5 w-3.5" />
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </React.Fragment>
+                                    )
+                                })}
+
+                                {/* Totals row */}
+                                <tr style={{ backgroundColor: 'hsl(var(--secondary))' }}>
+                                    <td className="pl-4 text-sm font-semibold text-foreground/70">Total</td>
+                                    <td className="text-right text-sm financial-figure font-semibold text-foreground/70">
+                                        {formatCurrency(totalBudgeted)}
+                                    </td>
+                                    <td className={`text-right text-sm financial-figure font-semibold ${totalActivity < 0 ? 'text-destructive/80' : 'text-primary/80'}`}>
                                         {formatCurrency(totalActivity)}
                                     </td>
-                                    <td className={`text-right ${getAvailableClass(totalAvailable)}`}>
-                                        {formatCurrency(totalAvailable)}
+                                    <td className="text-right pr-4">
+                                        <span className={getAvailableClass(totalAvailable)}>
+                                            {formatCurrency(totalAvailable)}
+                                        </span>
                                     </td>
                                     <td></td>
                                 </tr>
