@@ -1,14 +1,16 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
-import { supabase } from '../providers'
+import { useAuth } from '../providers'
 import { TopNav } from '@/app/dashboard/top-nav'
 import { Sidebar } from '@/app/dashboard/sidebar'
 import { BudgetView } from '@/app/dashboard/budget-view'
+import { TransactionsView } from '@/app/dashboard/transactions-view'
 import { ManagePayeesModal } from '@/app/dashboard/manage-payees-modal'
 
-const TransactionsView = dynamic(() => import('@/app/dashboard/transactions-view').then(m => ({ default: m.TransactionsView })))
+// TransactionsView is a static import so it's always available without a loading flash.
+// ScheduledTransactionsView and ReportsView remain lazy since they're accessed less often.
 const ScheduledTransactionsView = dynamic(() => import('@/app/dashboard/scheduled-transactions-view').then(m => ({ default: m.ScheduledTransactionsView })))
 const ReportsView = dynamic(() => import('@/app/dashboard/reports-view').then(m => ({ default: m.ReportsView })))
 import { SetupWizard } from '@/app/dashboard/setup-wizard'
@@ -43,12 +45,18 @@ const VIEW_LABELS: Record<ViewType, string> = {
 }
 
 export function Dashboard() {
+    const { accessToken } = useAuth()
+    // Stable ref so callbacks always read the current token without re-creating functions
+    const accessTokenRef = useRef<string | null>(null)
+    accessTokenRef.current = accessToken
+
     const [accounts, setAccounts] = useState<Account[]>([])
     const [categories, setCategories] = useState<Category[]>([])
     const [selectedAccount, setSelectedAccount] = useState<Account | null>(null)
     const [currentView, setCurrentView] = useState<ViewType>('budget')
     const [showManagePayees, setShowManagePayees] = useState(false)
     const [showWizard, setShowWizard] = useState(false)
+    // Start unchecked to match SSR; synchronously resolved from localStorage before first paint.
     const [wizardChecked, setWizardChecked] = useState(false)
     const [budgetRefreshKey, setBudgetRefreshKey] = useState(0)
     const [currentMonth, setCurrentMonth] = useState(() => {
@@ -56,7 +64,18 @@ export function Dashboard() {
         return { month: now.getMonth() + 1, year: now.getFullYear() }
     })
 
+    // For returning users who have already dismissed the wizard, skip the loading
+    // screen entirely by resolving wizardChecked before the first browser paint.
+    useLayoutEffect(() => {
+        if (localStorage.getItem('allocat_wizard_dismissed')) {
+            setWizardChecked(true)
+        }
+    }, [])
+
     useEffect(() => {
+        // Gate on accessToken to avoid concurrent getSession() calls that deadlock
+        // during token refresh (same pattern used in budget-view.tsx)
+        if (!accessToken) return
         Promise.all([fetchAccounts(), fetchCategories()]).then(([accts, cats]) => {
             if (
                 accts.length === 0 &&
@@ -67,14 +86,15 @@ export function Dashboard() {
             }
             setWizardChecked(true)
         })
-    }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [accessToken])
 
     const fetchAccounts = async (): Promise<Account[]> => {
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return []
+            const token = accessTokenRef.current
+            if (!token) return []
             const response = await fetch('/api/accounts', {
-                headers: { 'Authorization': `Bearer ${session.access_token}` }
+                headers: { 'Authorization': `Bearer ${token}` }
             })
             if (response.ok) {
                 const { accounts } = await response.json()
@@ -92,10 +112,10 @@ export function Dashboard() {
 
     const fetchCategories = async (): Promise<Category[]> => {
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return []
+            const token = accessTokenRef.current
+            if (!token) return []
             const response = await fetch('/api/categories', {
-                headers: { 'Authorization': `Bearer ${session.access_token}` }
+                headers: { 'Authorization': `Bearer ${token}` }
             })
             if (response.ok) {
                 const { flat } = await response.json()
@@ -112,6 +132,21 @@ export function Dashboard() {
     const handleAccountSelect = (account: Account) => {
         setSelectedAccount(account)
         setCurrentView('transactions')
+    }
+
+    /**
+     * Update account balances locally after a transaction mutation, avoiding a
+     * full server round-trip for fetchAccounts. Also invalidates the budget cache
+     * so the Budget view reflects the new activity/available amounts.
+     */
+    const handleBalanceDelta = (deltas: { accountId: string; delta: number }[]) => {
+        if (deltas.length === 0) return
+        setAccounts(prev => prev.map(a => {
+            const d = deltas.find(d => d.accountId === a.id)
+            return d ? { ...a, balance: a.balance + d.delta } : a
+        }))
+        // Invalidate budget cache so activity/available columns stay accurate
+        setBudgetRefreshKey(k => k + 1)
     }
 
     const handleMonthChange = (direction: 'prev' | 'next') => {
@@ -243,7 +278,24 @@ export function Dashboard() {
 
                     {/* View content */}
                     <div className="flex-1 pt-8 px-6 pb-6 overflow-auto">
-                        {currentView === 'budget' ? (
+                        {/*
+                          TransactionsView is always mounted so its account-keyed cache
+                          survives view switches. Hidden via CSS when another view is active.
+                          Use the live account from `accounts` (not selectedAccount) so the
+                          balance header updates immediately after local delta changes.
+                        */}
+                        <div className={currentView !== 'transactions' ? 'hidden' : ''}>
+                            <TransactionsView
+                                account={selectedAccount ? (accounts.find(a => a.id === selectedAccount.id) ?? selectedAccount) : null}
+                                accounts={accounts}
+                                categories={categories}
+                                onBalanceDelta={handleBalanceDelta}
+                                currentMonth={currentMonth.month}
+                                currentYear={currentMonth.year}
+                            />
+                        </div>
+
+                        {currentView === 'budget' && (
                             <BudgetView
                                 month={currentMonth.month}
                                 year={currentMonth.year}
@@ -251,22 +303,15 @@ export function Dashboard() {
                                 onCategoryAdded={fetchCategories}
                                 refreshKey={budgetRefreshKey}
                             />
-                        ) : currentView === 'transactions' ? (
-                            <TransactionsView
-                                account={selectedAccount}
-                                accounts={accounts}
-                                categories={categories}
-                                onTransactionAdded={fetchAccounts}
-                                currentMonth={currentMonth.month}
-                                currentYear={currentMonth.year}
-                            />
-                        ) : currentView === 'scheduled' ? (
+                        )}
+                        {currentView === 'scheduled' && (
                             <ScheduledTransactionsView
                                 accounts={accounts}
                                 categories={categories}
                                 onTransactionAdded={fetchAccounts}
                             />
-                        ) : (
+                        )}
+                        {currentView === 'reports' && (
                             <ReportsView
                                 month={currentMonth.month}
                                 year={currentMonth.year}

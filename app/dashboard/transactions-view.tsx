@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import { supabase } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,7 +10,7 @@ import {
     Pencil, Trash2, Scale, ChevronDown, ChevronRight, Search, X, Lock,
 } from 'lucide-react'
 import { AddTransactionModal } from '@/app/dashboard/add-transaction-modal'
-import type { EditingTransaction } from '@/app/dashboard/add-transaction-modal'
+import type { EditingTransaction, TransactionMutationInfo } from '@/app/dashboard/add-transaction-modal'
 import { ReconcileModal } from '@/app/dashboard/reconcile-modal'
 import type { Account, Category } from '@/app/dashboard/dashboard'
 
@@ -41,11 +41,17 @@ interface Transaction {
     to_account_id: string | null
 }
 
+interface BalanceDelta {
+    accountId: string
+    delta: number
+}
+
 interface TransactionsViewProps {
     account: Account | null
     accounts: Account[]
     categories: Category[]
-    onTransactionAdded: () => void
+    /** Called after any mutation so Dashboard can update balances without a server round-trip */
+    onBalanceDelta: (deltas: BalanceDelta[]) => void
     currentMonth?: number
     currentYear?: number
 }
@@ -97,10 +103,10 @@ const getTypeIcon = (type: string) => {
 }
 
 export function TransactionsView({
-    account, accounts, categories, onTransactionAdded, currentMonth, currentYear
+    account, accounts, categories, onBalanceDelta, currentMonth, currentYear
 }: TransactionsViewProps) {
     const [transactions, setTransactions] = useState<Transaction[]>([])
-    const [loading, setLoading] = useState(true)
+    const [loading, setLoading] = useState(false)
     const [showAddTransaction, setShowAddTransaction] = useState(false)
     const [editing, setEditing] = useState<EditingTransaction | null>(null)
     const [showReconcile, setShowReconcile] = useState(false)
@@ -111,37 +117,91 @@ export function TransactionsView({
     const [startDate, setStartDate] = useState('')
     const [endDate, setEndDate] = useState('')
 
-    useEffect(() => {
-        if (account) fetchTransactions()
-    }, [account])
+    // Account-keyed transaction cache — persists across account switches while this
+    // component remains mounted (Dashboard always renders it, hidden when not active).
+    const cache = useRef<Map<string, Transaction[]>>(new Map())
+    // Guards against stale background fetches overwriting the active account's data
+    const activeAccountId = useRef<string | null>(null)
+    // Stable ref to account so fetchTransactions doesn't need it as a dependency
+    const accountRef = useRef(account)
+    accountRef.current = account
 
-    const fetchTransactions = async () => {
-        if (!account) return
-        setLoading(true)
+    // Fetch transactions for the current account.
+    // background=true: silent refresh, no loading spinner, only updates state if still active.
+    const fetchTransactions = useCallback(async (background = false) => {
+        const acc = accountRef.current
+        if (!acc) return
+        const accountId = acc.id
+        if (!background) setLoading(true)
         try {
             const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
-            const response = await fetch(`/api/transactions?account_id=${account.id}`, {
+            if (!session) { if (!background) setLoading(false); return }
+            const response = await fetch(`/api/transactions?account_id=${accountId}`, {
                 headers: { 'Authorization': `Bearer ${session.access_token}` },
             })
             if (response.ok) {
-                const { transactions } = await response.json()
-                setTransactions(transactions)
+                const { transactions: data } = await response.json()
+                // Discard result if the user has already switched to a different account
+                if (activeAccountId.current === accountId) {
+                    cache.current.set(accountId, data)
+                    setTransactions(data)
+                }
             }
         } catch (error) {
             console.error('Error fetching transactions:', error)
         } finally {
-            setLoading(false)
+            if (!background && activeAccountId.current === accountId) setLoading(false)
         }
+    }, []) // stable — reads account via ref
+
+    // On account switch: serve cache instantly, background-refresh to stay current.
+    // Keyed on account?.id so balance updates (same ID, new object) don't re-trigger.
+    useEffect(() => {
+        if (!account) return
+        activeAccountId.current = account.id
+        const cached = cache.current.get(account.id)
+        if (cached) {
+            setTransactions(cached)
+            setLoading(false)
+            fetchTransactions(true)
+        } else {
+            setLoading(true)
+            fetchTransactions(false)
+        }
+    }, [account?.id, fetchTransactions])
+
+    // After add or edit: background-refresh the list and update account balance locally.
+    const handleTransactionAdded = (info: TransactionMutationInfo) => {
+        fetchTransactions(true)
+
+        const deltas: BalanceDelta[] = [{ accountId: account!.id, delta: info.oldAmount !== undefined ? info.amount - info.oldAmount : info.amount }]
+        // For transfers also update the paired account's balance
+        if (info.type === 'transfer' && info.to_account_id) {
+            // Source leg is negative (info.amount); destination leg is the opposite sign.
+            // Delta for the destination = -info.amount for adds, -(info.amount - info.oldAmount) for edits.
+            const destDelta = info.oldAmount !== undefined ? -(info.amount - info.oldAmount) : -info.amount
+            deltas.push({ accountId: info.to_account_id, delta: destDelta })
+        }
+        onBalanceDelta(deltas)
     }
 
-    const handleTransactionAdded = () => {
-        fetchTransactions()
-        onTransactionAdded()
-    }
-
+    // Optimistic delete: remove immediately, restore on failure.
     const handleDelete = async (transaction: Transaction) => {
         if (!confirm('Delete this transaction? This cannot be undone.')) return
+
+        // Optimistic remove
+        const prev = transactions
+        const next = transactions.filter(t => t.id !== transaction.id)
+        setTransactions(next)
+        cache.current.set(account!.id, next)
+
+        const deltas: BalanceDelta[] = [{ accountId: account!.id, delta: -transaction.amount }]
+        if (transaction.type === 'transfer' && transaction.to_account_id) {
+            // Paired leg has the opposite amount; deleting it removes that too
+            deltas.push({ accountId: transaction.to_account_id, delta: transaction.amount })
+        }
+        onBalanceDelta(deltas)
+
         try {
             const { data: { session } } = await supabase.auth.getSession()
             if (!session) return
@@ -149,36 +209,46 @@ export function TransactionsView({
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${session.access_token}` },
             })
-            if (response.ok) {
-                fetchTransactions()
-                onTransactionAdded()
-            } else {
+            if (!response.ok) {
+                // Revert optimistic changes
+                setTransactions(prev)
+                cache.current.set(account!.id, prev)
+                // Reverse the balance deltas
+                onBalanceDelta(deltas.map(d => ({ ...d, delta: -d.delta })))
                 const err = await response.json()
                 alert(`Error: ${err.error}`)
             }
         } catch (error) {
+            setTransactions(prev)
+            cache.current.set(account!.id, prev)
+            onBalanceDelta(deltas.map(d => ({ ...d, delta: -d.delta })))
             console.error('Error deleting transaction:', error)
         }
     }
 
+    // Cleared toggle: optimistic local update only — cleared status does not affect
+    // account balance (balance = SUM of all amounts regardless of cleared state).
     const handleClearedToggle = async (transaction: Transaction) => {
         if (transaction.cleared === 'reconciled') return
         const newCleared = transaction.cleared === 'uncleared' ? 'cleared' : 'uncleared'
+        // Optimistic local update
+        setTransactions(prev => prev.map(t =>
+            t.id === transaction.id ? { ...t, cleared: newCleared } : t
+        ))
         try {
             const { data: { session } } = await supabase.auth.getSession()
             if (!session) return
-            const response = await fetch(`/api/transactions/${transaction.id}`, {
+            await fetch(`/api/transactions/${transaction.id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
                 body: JSON.stringify({ cleared: newCleared }),
             })
-            if (response.ok) {
-                setTransactions(prev => prev.map(t =>
-                    t.id === transaction.id ? { ...t, cleared: newCleared } : t
-                ))
-                onTransactionAdded()
-            }
+            // No balance delta needed — cleared status doesn't change the account balance
         } catch (error) {
+            // Revert on failure
+            setTransactions(prev => prev.map(t =>
+                t.id === transaction.id ? { ...t, cleared: transaction.cleared } : t
+            ))
             console.error('Error toggling cleared:', error)
         }
     }
@@ -225,11 +295,81 @@ export function TransactionsView({
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-64">
-                <div className="flex flex-col items-center gap-3">
-                    <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                    <span className="text-sm text-muted-foreground">Loading transactions…</span>
+            <div className="space-y-4">
+                {/* Account header skeleton */}
+                <div className="flex items-center justify-between animate-pulse">
+                    <div>
+                        <div className="h-6 w-36 bg-muted rounded" />
+                        <div className="h-3 w-20 bg-muted rounded mt-2" />
+                    </div>
+                    <div className="text-right">
+                        <div className="h-8 w-28 bg-muted rounded ml-auto" />
+                        <div className="h-3 w-24 bg-muted rounded mt-2 ml-auto" />
+                    </div>
                 </div>
+                {/* Filter bar skeleton */}
+                <Card>
+                    <CardHeader className="py-3 px-4">
+                        <div className="flex items-center gap-2 animate-pulse">
+                            <div className="h-8 w-52 bg-muted rounded-lg" />
+                            <div className="h-8 flex-1 bg-muted rounded-lg" />
+                            <div className="h-8 w-64 bg-muted rounded-lg" />
+                            <div className="ml-auto flex gap-2">
+                                <div className="h-8 w-24 bg-muted rounded" />
+                                <div className="h-8 w-32 bg-muted rounded" />
+                            </div>
+                        </div>
+                    </CardHeader>
+                </Card>
+                {/* Transaction table skeleton */}
+                <Card>
+                    <CardContent className="p-0">
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead>
+                                    <tr style={{ backgroundColor: 'hsl(var(--secondary))' }}>
+                                        <th className="w-8 py-3 px-3" />
+                                        <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Date</th>
+                                        <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Payee</th>
+                                        <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Category</th>
+                                        <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Memo</th>
+                                        <th className="text-right py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Amount</th>
+                                        <th className="text-center py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground w-20">Type</th>
+                                        <th className="w-16" />
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {[...Array(8)].map((_, i) => (
+                                        <tr key={i} className="border-t animate-pulse" style={{ borderColor: 'hsl(var(--border) / 0.5)' }}>
+                                            <td className="py-3 px-3">
+                                                <div className="h-2.5 w-2.5 rounded-full bg-muted mx-auto" />
+                                            </td>
+                                            <td className="py-3 px-3">
+                                                <div className="h-3 w-16 bg-muted rounded" />
+                                            </td>
+                                            <td className="py-3 px-3">
+                                                <div className="h-3 bg-muted rounded" style={{ width: `${80 + (i * 17) % 60}px` }} />
+                                            </td>
+                                            <td className="py-3 px-3">
+                                                <div className="h-3 bg-muted rounded" style={{ width: `${60 + (i * 11) % 50}px` }} />
+                                            </td>
+                                            <td className="py-3 px-3">
+                                                <div className="h-3 w-20 bg-muted rounded" />
+                                            </td>
+                                            <td className="py-3 px-3 text-right">
+                                                <div className="h-3 w-14 bg-muted rounded ml-auto" />
+                                            </td>
+                                            <td className="py-3 px-3">
+                                                <div className="h-3.5 w-3.5 bg-muted rounded mx-auto" />
+                                            </td>
+                                            <td />
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </CardContent>
+                </Card>
             </div>
         )
     }
@@ -248,7 +388,7 @@ export function TransactionsView({
                     <div className={`font-display text-2xl font-bold financial-figure ${account.is_liability ? 'text-destructive' : 'text-foreground'}`}>
                         {balanceDisplay}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">Cleared Balance</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Working Balance</p>
                 </div>
             </div>
 
@@ -382,9 +522,8 @@ export function TransactionsView({
                                         const amountClass = transaction.amount >= 0 ? 'text-primary' : 'text-destructive'
 
                                         return (
-                                            <>
+                                            <Fragment key={transaction.id}>
                                                 <tr
-                                                    key={transaction.id}
                                                     className="group border-t hover:bg-muted/30 transition-colors"
                                                     style={{ borderColor: 'hsl(var(--border) / 0.5)' }}
                                                 >
@@ -514,7 +653,7 @@ export function TransactionsView({
                                                         <td colSpan={2}></td>
                                                     </tr>
                                                 ))}
-                                            </>
+                                            </Fragment>
                                         )
                                     })}
                                 </tbody>
@@ -547,8 +686,9 @@ export function TransactionsView({
                     onOpenChange={setShowReconcile}
                     account={account}
                     onReconciled={() => {
-                        fetchTransactions()
-                        onTransactionAdded()
+                        // Reconciliation changes cleared status — refetch to update the list.
+                        // Balances are unaffected by reconciliation so no delta needed.
+                        fetchTransactions(false)
                     }}
                 />
             )}

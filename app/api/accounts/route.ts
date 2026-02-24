@@ -26,35 +26,39 @@ export async function GET(request: NextRequest) {
             return createErrorResponse(error.message, 500)
         }
 
-        // Compute balance for each account from cleared + reconciled transactions
-        const accountsWithBalance = await Promise.all(
-            (accounts ?? []).map(async (account) => {
-                const { data: txData } = await supabase
-                    .from('transactions')
-                    .select('amount')
-                    .eq('account_id', account.id)
-                    .in('cleared', ['cleared', 'reconciled'])
-                    .is('parent_transaction_id', null)
+        // Compute balance for each account: single bulk query instead of N per-account queries
+        const accountIds = (accounts ?? []).map(a => a.id)
+        const balanceByAccount = new Map<string, number>()
 
-                const balance = (txData ?? []).reduce(
-                    (sum, t) => new Decimal(sum).plus(t.amount).toNumber(),
-                    0
+        if (accountIds.length > 0) {
+            const { data: txData } = await supabase
+                .from('transactions')
+                .select('account_id, amount')
+                .in('account_id', accountIds)
+                .is('parent_transaction_id', null)
+
+            for (const tx of txData ?? []) {
+                balanceByAccount.set(
+                    tx.account_id,
+                    new Decimal(balanceByAccount.get(tx.account_id) ?? 0).plus(tx.amount).toNumber()
                 )
+            }
+        }
 
-                const accountType = account.account_types as any
-                return {
-                    id: account.id,
-                    name: account.name,
-                    type_name: accountType.name as string,
-                    is_liability: accountType.is_liability as boolean,
-                    is_budget_account: (account.on_budget ?? accountType.is_budget_account) as boolean,
-                    is_closed: account.is_closed,
-                    note: account.note,
-                    payment_category_id: account.payment_category_id,
-                    balance,
-                }
-            })
-        )
+        const accountsWithBalance = (accounts ?? []).map((account) => {
+            const accountType = account.account_types as any
+            return {
+                id: account.id,
+                name: account.name,
+                type_name: accountType.name as string,
+                is_liability: accountType.is_liability as boolean,
+                is_budget_account: (account.on_budget ?? accountType.is_budget_account) as boolean,
+                is_closed: account.is_closed,
+                note: account.note,
+                payment_category_id: account.payment_category_id,
+                balance: balanceByAccount.get(account.id) ?? 0,
+            }
+        })
 
         return NextResponse.json({ accounts: accountsWithBalance })
     } catch (error) {
@@ -194,9 +198,7 @@ export async function POST(request: NextRequest) {
                 .from('transactions')
                 .insert({
                     account_id: account.id,
-                    // For CC accounts, assign negative starting balance to the payment category
-                    // so it reflects the pre-existing debt in the CC Payment category available
-                    category_id: (isCreditAccount && paymentCategoryId && amount < 0) ? paymentCategoryId : null,
+                    category_id: null,
                     amount,
                     date: new Date().toISOString().split('T')[0],
                     memo: 'Starting Balance',

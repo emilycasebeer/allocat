@@ -13,6 +13,7 @@ export interface BudgetCategoryRow {
     id: string
     name: string
     group_name: string
+    is_system: boolean
     budgeted_amount: number
     activity_amount: number
     available_amount: number
@@ -33,17 +34,31 @@ export class BudgetingEngine {
     /**
      * Compute the total activity (sum of transaction amounts) for a category in a given month.
      * Includes both top-level and split-child transactions that carry this category_id.
+     *
+     * NOTE: This method is kept for standalone use. getBudgetSummary uses bulk computation
+     * internally and does not call this method.
      */
-    async computeActivity(categoryId: string, month: number, year: number): Promise<number> {
+    async computeActivity(
+        categoryId: string,
+        month: number,
+        year: number,
+        excludeAccountId?: string
+    ): Promise<number> {
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`
         const endDate = new Date(year, month, 0).toISOString().split('T')[0]
 
-        const { data, error } = await this.supabase
+        let query = this.supabase
             .from('transactions')
             .select('amount')
             .eq('category_id', categoryId)
             .gte('date', startDate)
             .lte('date', endDate)
+
+        if (excludeAccountId) {
+            query = query.neq('account_id', excludeAccountId)
+        }
+
+        const { data, error } = await query
 
         if (error || !data) return 0
 
@@ -55,15 +70,18 @@ export class BudgetingEngine {
      * available(M) = budgeted(M) + activity(M) + max(0, available(M-1))
      *
      * Walks back up to 24 months to find the running available balance.
+     *
+     * NOTE: This method is kept for standalone use. getBudgetSummary uses bulk computation
+     * internally and does not call this method.
      */
     async computeAvailable(
         categoryId: string,
         month: number,
         year: number,
         userId: string,
-        carryNegative = false
+        carryNegative = false,
+        excludeAccountId?: string
     ): Promise<number> {
-        // Build a list of up to 24 months going back from the target month (inclusive), oldest first
         const months: { month: number; year: number }[] = []
         let m = month
         let y = year
@@ -73,7 +91,6 @@ export class BudgetingEngine {
             if (m === 0) { m = 12; y-- }
         }
 
-        // Fetch all budget rows for this user in the range
         const { data: budgets } = await this.supabase
             .from('budgets')
             .select('id, month, year')
@@ -88,7 +105,6 @@ export class BudgetingEngine {
 
         const budgetMap = new Map(budgets.map(b => [`${b.year}-${b.month}`, b.id]))
 
-        // Fetch all allocations for this category across those budgets
         const budgetIds = budgets.map(b => b.id)
         const { data: allocations } = await this.supabase
             .from('category_allocations')
@@ -100,18 +116,16 @@ export class BudgetingEngine {
             (allocations ?? []).map(a => [a.budget_id, a.budgeted_amount])
         )
 
-        // Walk forward month by month accumulating available
         let available = new Decimal(0)
         for (const { month: mo, year: yr } of months) {
             const budgetId = budgetMap.get(`${yr}-${mo}`)
             if (!budgetId) {
-                // No budget this month — carry forward positive balance only
                 if (available.isNegative()) available = new Decimal(0)
                 continue
             }
 
             const budgeted = new Decimal(allocationMap.get(budgetId) ?? 0)
-            const activity = new Decimal(await this.computeActivity(categoryId, mo, yr))
+            const activity = new Decimal(await this.computeActivity(categoryId, mo, yr, excludeAccountId))
             const rollover = (carryNegative || available.isPositive()) ? available : new Decimal(0)
             available = rollover.plus(budgeted).plus(activity)
         }
@@ -121,7 +135,6 @@ export class BudgetingEngine {
 
     /**
      * Returns the IDs of all on-budget accounts for a user.
-     * Uses two queries to avoid complex nested joins: accounts → account_types.
      */
     private async getBudgetAccountIds(userId: string): Promise<string[]> {
         const { data: accounts } = await this.supabase
@@ -140,18 +153,12 @@ export class BudgetingEngine {
     /**
      * Compute To Be Budgeted for a given month.
      *
-     * YNAB-correct formula: TBB is cumulative — it equals the total of all income
-     * ever received into budget accounts (up to the end of this month) minus the
-     * total of all amounts ever budgeted across all months up to and including
-     * this month.  This is equivalent to the rolling formula
-     *   TBB(M) = TBB(M-1) + income(M) − budgeted(M)
-     * applied recursively all the way back to the beginning, which means prior
-     * months' unbudgeted money always carries forward correctly.
+     * NOTE: This method is kept for standalone use. getBudgetSummary uses bulk computation
+     * internally and does not call this method.
      */
     async computeTBB(userId: string, month: number, year: number): Promise<number> {
         const endDate = new Date(year, month, 0).toISOString().split('T')[0]
 
-        // Sum ALL income from on-budget accounts up to the end of this month
         const budgetAccountIds = await this.getBudgetAccountIds(userId)
 
         let totalIncome = 0
@@ -169,7 +176,6 @@ export class BudgetingEngine {
             )
         }
 
-        // Sum ALL budgeted allocations across every budget month up to and including this one
         const { data: allBudgets } = await this.supabase
             .from('budgets')
             .select('id, month, year')
@@ -196,8 +202,9 @@ export class BudgetingEngine {
 
     /**
      * Compute the net CC activity for a payment category: charges - payments.
-     * Charges = categorized expenses on the CC account (top-level + split children).
-     * Payments = transfers TO the CC account (positive amounts on the CC side).
+     *
+     * NOTE: This method is kept for standalone use. getBudgetSummary uses bulk computation
+     * internally and does not call this method.
      */
     private async computeCCActivity(
         accountId: string,
@@ -208,9 +215,6 @@ export class BudgetingEngine {
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`
         const endDate = new Date(year, month, 0).toISOString().split('T')[0]
 
-        // Top-level categorized expenses — exclude transactions assigned to the payment
-        // category itself (e.g. starting balance), since those represent pre-existing debt
-        // already reflected in activity, not new charges that need auto-crediting.
         let topLevelQuery = this.supabase
             .from('transactions')
             .select('amount')
@@ -225,7 +229,6 @@ export class BudgetingEngine {
         }
         const { data: topLevel } = await topLevelQuery
 
-        // Split children on this CC account
         let splitQuery = this.supabase
             .from('transactions')
             .select('amount')
@@ -240,7 +243,6 @@ export class BudgetingEngine {
         }
         const { data: splitChildren } = await splitQuery
 
-        // Transfers TO the CC (positive amount on CC side = payment from checking)
         const { data: payments } = await this.supabase
             .from('transactions')
             .select('amount')
@@ -262,66 +264,258 @@ export class BudgetingEngine {
 
     /**
      * Get a full budget summary for a month with all values computed from transactions.
+     *
+     * Optimized: uses 6 queries in 2 parallel rounds instead of 500+ sequential queries.
+     *
+     * Round 1 (2 parallel): all user accounts, all user budgets
+     * Round 2 (4 parallel): current allocations+goals, all historical allocations,
+     *                        all transactions in 24-month window, all-time income for TBB
+     *
+     * All per-category computation (activity, available, CC activity, TBB) runs in
+     * JavaScript from pre-fetched in-memory maps — no async in the category loop.
      */
     async getBudgetSummary(userId: string, month: number, year: number): Promise<BudgetSummary> {
-        const { data: budget, error } = await this.supabase
-            .from('budgets')
-            .select('id, month, year')
-            .eq('user_id', userId)
-            .eq('month', month)
-            .eq('year', year)
-            .single()
+        const endOfCurrentMonth = new Date(year, month, 0).toISOString().split('T')[0]
 
-        if (error || !budget) {
-            throw new Error('Budget not found for specified month')
+        // Build 24-month lookback range, oldest first (same cap as computeAvailable)
+        const months: { month: number; year: number }[] = []
+        let m = month, y = year
+        for (let i = 0; i < 24; i++) {
+            months.unshift({ month: m, year: y })
+            m--
+            if (m === 0) { m = 12; y-- }
+        }
+        const startOfRange = `${months[0].year}-${String(months[0].month).padStart(2, '0')}-01`
+
+        // ── Round 1: accounts + all budgets (2 parallel queries) ─────────────────
+        const [accountsResult, allBudgetsResult] = await Promise.all([
+            this.supabase
+                .from('accounts')
+                .select('id, on_budget, payment_category_id, account_types!inner(is_budget_account)')
+                .eq('user_id', userId),
+            this.supabase
+                .from('budgets')
+                .select('id, month, year')
+                .eq('user_id', userId),
+        ])
+
+        const allAccounts = accountsResult.data ?? []
+        const allBudgets = allBudgetsResult.data ?? []
+
+        // Derive account sets from Round 1
+        const budgetAccountIds = allAccounts
+            .filter(a => {
+                const type = a.account_types as any
+                return a.on_budget ?? type?.is_budget_account ?? true
+            })
+            .map(a => a.id)
+
+        const ccPaymentMap = new Map<string, string>() // payment_category_id → account_id
+        for (const acc of allAccounts) {
+            if (acc.payment_category_id) ccPaymentMap.set(acc.payment_category_id, acc.id)
         }
 
-        // Build a map of payment_category_id → account_id for all CC accounts
-        const { data: ccAccounts } = await this.supabase
-            .from('accounts')
-            .select('id, payment_category_id')
-            .eq('user_id', userId)
-            .not('payment_category_id', 'is', null)
+        const allAccountIds = allAccounts.map(a => a.id)
 
-        const ccPaymentMap = new Map<string, string>() // category_id → account_id
-        for (const acc of ccAccounts ?? []) {
-            if (acc.payment_category_id) {
-                ccPaymentMap.set(acc.payment_category_id, acc.id)
-            }
-        }
+        const currentBudget = allBudgets.find(b => b.month === month && b.year === year)
+        if (!currentBudget) throw new Error('Budget not found for specified month')
 
-        const { data: allocations } = await this.supabase
-            .from('category_allocations')
-            .select(`
-                budget_id,
-                category_id,
-                budgeted_amount,
-                categories!inner(
-                    name,
-                    category_groups!inner(name),
-                    category_goals(
-                        id, goal_type, target_amount, target_date, monthly_amount
+        // Budget lookup maps
+        const monthYearToBudgetId = new Map(allBudgets.map(b => [`${b.year}-${b.month}`, b.id]))
+        const budgetIdToMonthYear = new Map(allBudgets.map(b => [b.id, { month: b.month, year: b.year }]))
+
+        const allBudgetIds = allBudgets.map(b => b.id)
+
+        // ── Round 2: allocations + transactions (4 parallel queries) ─────────────
+        const [currentAllocResult, allAllocResult, transactionsResult, tbbIncomeResult] = await Promise.all([
+            // Current month allocations with full category metadata
+            this.supabase
+                .from('category_allocations')
+                .select(`
+                    budget_id,
+                    category_id,
+                    budgeted_amount,
+                    categories!inner(
+                        name,
+                        is_system,
+                        category_groups!inner(name),
+                        category_goals(
+                            id, goal_type, target_amount, target_date, monthly_amount
+                        )
                     )
-                )
-            `)
-            .eq('budget_id', budget.id)
+                `)
+                .eq('budget_id', currentBudget.id),
+
+            // All allocations across all user budgets
+            // Used for: computeAvailable (24-month history) and TBB (all-time budgeted sum)
+            allBudgetIds.length > 0
+                ? this.supabase
+                    .from('category_allocations')
+                    .select('budget_id, category_id, budgeted_amount')
+                    .in('budget_id', allBudgetIds)
+                : Promise.resolve({ data: [] as { budget_id: string; category_id: string; budgeted_amount: number }[], error: null }),
+
+            // All transactions for all user accounts in the 24-month window
+            // Used for: per-category activity, computeAvailable, CC activity
+            allAccountIds.length > 0
+                ? this.supabase
+                    .from('transactions')
+                    .select('account_id, category_id, amount, date, type, parent_transaction_id')
+                    .in('account_id', allAccountIds)
+                    .gte('date', startOfRange)
+                    .lte('date', endOfCurrentMonth)
+                : Promise.resolve({ data: [] as { account_id: string; category_id: string | null; amount: number; date: string; type: string; parent_transaction_id: string | null }[], error: null }),
+
+            // All-time income from budget accounts (unbounded — required for correct TBB)
+            budgetAccountIds.length > 0
+                ? this.supabase
+                    .from('transactions')
+                    .select('amount')
+                    .in('account_id', budgetAccountIds)
+                    .eq('type', 'income')
+                    .lte('date', endOfCurrentMonth)
+                    .is('parent_transaction_id', null)
+                : Promise.resolve({ data: [] as { amount: number }[], error: null }),
+        ])
+
+        const currentAllocations = currentAllocResult.data ?? []
+        const allAllocations = allAllocResult.data ?? []
+        const transactions = transactionsResult.data ?? []
+        const incomeTransactions = tbbIncomeResult.data ?? []
+
+        // ── Build lookup structures from bulk data ────────────────────────────────
+
+        // allAllocMap: Map<categoryId, Map<budgetId, budgetedAmount>>
+        // Used by computeAvailable to look up what was budgeted in each historical month
+        const allAllocMap = new Map<string, Map<string, number>>()
+        for (const alloc of allAllocations) {
+            if (!allAllocMap.has(alloc.category_id)) {
+                allAllocMap.set(alloc.category_id, new Map())
+            }
+            allAllocMap.get(alloc.category_id)!.set(alloc.budget_id, Number(alloc.budgeted_amount))
+        }
+
+        // activityByCatMonth: Map<`${categoryId}|${yr}|${mo}`, Map<accountId, amount>>
+        // Keyed by account so we can exclude specific accounts (e.g. CC payment categories)
+        const activityByCatMonth = new Map<string, Map<string, number>>()
+
+        // txByAccount: Map<accountId, tx[]>
+        // Used by CC activity computation to iterate only the relevant account's transactions
+        type TxRow = { category_id: string | null; amount: number; date: string; type: string; parent_transaction_id: string | null }
+        const txByAccount = new Map<string, TxRow[]>()
+
+        for (const tx of transactions) {
+            // Index by account_id for CC lookups
+            if (!txByAccount.has(tx.account_id)) txByAccount.set(tx.account_id, [])
+            txByAccount.get(tx.account_id)!.push(tx)
+
+            // Index by category+month for activity lookups
+            if (!tx.category_id) continue
+            const yr = Number(tx.date.substring(0, 4))
+            const mo = Number(tx.date.substring(5, 7))
+            const key = `${tx.category_id}|${yr}|${mo}`
+            if (!activityByCatMonth.has(key)) activityByCatMonth.set(key, new Map())
+            const acctMap = activityByCatMonth.get(key)!
+            acctMap.set(
+                tx.account_id,
+                new Decimal(acctMap.get(tx.account_id) ?? 0).plus(tx.amount).toNumber()
+            )
+        }
+
+        // ── Pure-JS computation helpers (no async, no queries) ───────────────────
+
+        // Sum activity for a category in a given month, optionally excluding one account
+        const getActivity = (categoryId: string, mo: number, yr: number, excludeAccountId?: string): number => {
+            const acctMap = activityByCatMonth.get(`${categoryId}|${yr}|${mo}`)
+            if (!acctMap) return 0
+            let total = new Decimal(0)
+            for (const [accId, amount] of acctMap) {
+                if (excludeAccountId && accId === excludeAccountId) continue
+                total = total.plus(amount)
+            }
+            return total.toNumber()
+        }
+
+        // Walk 24 months forward to compute rolling available balance
+        const computeAvailableFn = (
+            categoryId: string,
+            carryNegative: boolean,
+            excludeAccountId?: string
+        ): number => {
+            const catBudgets = allAllocMap.get(categoryId)
+            let available = new Decimal(0)
+
+            for (const { month: mo, year: yr } of months) {
+                const budgetId = monthYearToBudgetId.get(`${yr}-${mo}`)
+                if (!budgetId) {
+                    if (available.isNegative()) available = new Decimal(0)
+                    continue
+                }
+
+                const budgeted = new Decimal(catBudgets?.get(budgetId) ?? 0)
+                const activity = new Decimal(getActivity(categoryId, mo, yr, excludeAccountId))
+                const rollover = (carryNegative || available.isPositive()) ? available : new Decimal(0)
+                available = rollover.plus(budgeted).plus(activity)
+            }
+
+            return available.toNumber()
+        }
+
+        // Net CC activity for a payment category: categorized charges minus payments
+        // Expenses are stored as negative amounts; payments (transfers to CC) as positive
+        const getCCActivityFn = (accountId: string, paymentCategoryId?: string): number => {
+            const accountTxs = txByAccount.get(accountId) ?? []
+            const moStr = String(month).padStart(2, '0')
+            const yrStr = String(year)
+
+            let charges = new Decimal(0)
+            let payments = new Decimal(0)
+
+            for (const tx of accountTxs) {
+                if (tx.date.substring(0, 4) !== yrStr || tx.date.substring(5, 7) !== moStr) continue
+
+                if (tx.type === 'expense' && tx.category_id && tx.category_id !== paymentCategoryId) {
+                    // Expenses are negative; negate to accumulate as positive charges
+                    charges = charges.minus(tx.amount)
+                } else if (tx.type === 'transfer' && Number(tx.amount) > 0 && !tx.parent_transaction_id) {
+                    payments = payments.plus(tx.amount)
+                }
+            }
+
+            return charges.minus(payments).toNumber()
+        }
+
+        // ── TBB: total all-time income minus total all-time budgeted ─────────────
+
+        const totalIncome = incomeTransactions.reduce(
+            (sum, t) => new Decimal(sum).plus(t.amount).toNumber(), 0
+        )
+
+        const relevantBudgetIdSet = new Set(
+            allBudgets
+                .filter(b => b.year < year || (b.year === year && b.month <= month))
+                .map(b => b.id)
+        )
+        const totalBudgeted = allAllocations
+            .filter(a => relevantBudgetIdSet.has(a.budget_id))
+            .reduce((sum, a) => new Decimal(sum).plus(a.budgeted_amount).toNumber(), 0)
+
+        const tbb = new Decimal(totalIncome).minus(totalBudgeted).toNumber()
+
+        // ── Build category rows (synchronous — no DB calls) ───────────────────────
 
         const categories: BudgetCategoryRow[] = []
 
-        for (const alloc of allocations ?? []) {
+        for (const alloc of currentAllocations) {
             const cat = alloc.categories as any
-            const activity = await this.computeActivity(alloc.category_id, month, year)
             const ccAccountId = ccPaymentMap.get(alloc.category_id)
-            // CC payment categories carry negative balances forward (real debt persists month-to-month)
-            let available = await this.computeAvailable(
-                alloc.category_id, month, year, userId, ccAccountId !== undefined
-            )
+            const carryNegative = ccAccountId !== undefined
 
-            // Auto-credit CC payment categories with categorized CC charges this month
+            const activity = getActivity(alloc.category_id, month, year, ccAccountId)
+            let available = computeAvailableFn(alloc.category_id, carryNegative, ccAccountId)
+
             if (ccAccountId) {
-                const ccActivity = await this.computeCCActivity(
-                    ccAccountId, month, year, alloc.category_id
-                )
+                const ccActivity = getCCActivityFn(ccAccountId, alloc.category_id)
                 available = new Decimal(available).plus(ccActivity).toNumber()
             }
 
@@ -331,6 +525,7 @@ export class BudgetingEngine {
                 id: alloc.category_id,
                 name: cat.name,
                 group_name: cat.category_groups.name,
+                is_system: cat.is_system ?? false,
                 budgeted_amount: alloc.budgeted_amount,
                 activity_amount: activity,
                 available_amount: available,
@@ -338,10 +533,8 @@ export class BudgetingEngine {
             })
         }
 
-        const tbb = await this.computeTBB(userId, month, year)
-
         return {
-            id: budget.id,
+            id: currentBudget.id,
             month,
             year,
             to_be_budgeted: tbb,

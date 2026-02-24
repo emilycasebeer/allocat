@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { supabase } from '../providers'
+import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -16,6 +16,7 @@ interface BudgetCategory {
     id: string
     name: string
     group_name: string
+    is_system: boolean
     budgeted_amount: number
     activity_amount: number
     available_amount: number
@@ -83,6 +84,11 @@ const formatCurrency = (amount: number) => {
 }
 
 export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetViewProps) {
+    const { accessToken } = useAuth()
+    // Stable ref so fetchMonth (useCallback with [] deps) always reads the current token
+    const accessTokenRef = useRef(accessToken)
+    accessTokenRef.current = accessToken
+
     const [budgetSummary, setBudgetSummary] = useState<BudgetSummary | null>(null)
     const [loading, setLoading] = useState(true)
     const [editingCell, setEditingCell] = useState<string | null>(null)
@@ -104,10 +110,10 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
 
     const fetchMonth = useCallback(async (m: number, y: number, background: boolean) => {
         const key = cacheKey(m, y)
+        const token = accessTokenRef.current
+        if (!token) return
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
-            const headers = { 'Authorization': `Bearer ${session.access_token}` }
+            const headers = { 'Authorization': `Bearer ${token}` }
             let response = await fetch(`/api/budgets?month=${m}&year=${y}`, { headers })
             if (response.status === 404) {
                 response = await fetch('/api/budgets', {
@@ -144,8 +150,13 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
         }
     }, [fetchMonth])
 
-    // Fetch or show from cache when month/year/refreshKey changes
+    // Fetch or show from cache when month/year/refreshKey/accessToken changes.
+    // Gated on accessToken so we never call fetchMonth before auth is ready —
+    // this prevents the infinite skeleton caused by getSession() deadlocking when
+    // multiple components call it concurrently on the initial page load.
     useEffect(() => {
+        if (!accessToken) return
+
         const key = cacheKey(month, year)
         activeKey.current = key
 
@@ -168,7 +179,7 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
         }
 
         prefetchAdjacent(month, year)
-    }, [month, year, refreshKey, fetchMonth, prefetchAdjacent])
+    }, [month, year, refreshKey, accessToken, fetchMonth, prefetchAdjacent])
 
     // Keep fetchBudgetSummary for internal use (rename/delete/copy-last-month flows)
     const fetchBudgetSummary = useCallback(() => {
@@ -208,13 +219,13 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
 
         // Background sync
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
             const response = await fetch('/api/budgets/allocate', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`,
+                    'Authorization': `Bearer ${token}`,
                 },
                 body: JSON.stringify({ budget_id: budgetSummary.id, category_id: categoryId, amount: newAmount }),
             })
@@ -235,11 +246,11 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
         if (!budgetSummary) return
         setCopyingLastMonth(true)
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
             const response = await fetch('/api/budgets/copy', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ to_budget_id: budgetSummary.id }),
             })
             if (response.ok) {
@@ -266,11 +277,11 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
         const trimmed = newName.trim()
         if (!trimmed) { setRenamingCategory(null); return }
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
             const response = await fetch(`/api/categories/${categoryId}`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ name: trimmed }),
             })
             if (response.ok) {
@@ -290,11 +301,11 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
     const handleDeleteCategory = async (category: BudgetCategory) => {
         if (!confirm(`Delete "${category.name}"? This cannot be undone. Existing transactions will become uncategorized.`)) return
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
             const response = await fetch(`/api/categories/${category.id}`, {
                 method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${session.access_token}` },
+                headers: { 'Authorization': `Bearer ${token}` },
             })
             if (response.ok) {
                 onCategoryAdded()
@@ -325,11 +336,74 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-64">
-                <div className="flex flex-col items-center gap-3">
-                    <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                    <span className="text-sm text-muted-foreground">Loading budget…</span>
+            <div className="space-y-5">
+                {/* Stat cards skeleton */}
+                <div className="grid grid-cols-4 gap-3">
+                    {[...Array(4)].map((_, i) => (
+                        <div key={i} className="rounded-xl border p-5 bg-card/40 animate-pulse">
+                            <div className="h-2 w-24 bg-muted rounded mb-4" />
+                            <div className="h-8 w-28 bg-muted rounded" />
+                        </div>
+                    ))}
                 </div>
+                {/* Category table skeleton */}
+                <Card>
+                    <CardHeader className="pb-0">
+                        <div className="flex items-center justify-between animate-pulse">
+                            <div className="h-4 w-20 bg-muted rounded" />
+                            <div className="flex gap-2">
+                                <div className="h-8 w-24 bg-muted rounded" />
+                                <div className="h-8 w-32 bg-muted rounded" />
+                                <div className="h-8 w-28 bg-muted rounded" />
+                            </div>
+                        </div>
+                    </CardHeader>
+                    <CardContent className="p-0 mt-4">
+                        <div className="overflow-x-auto">
+                            <table className="budget-table">
+                                <thead>
+                                    <tr>
+                                        <th className="w-2/5 pl-4">Category</th>
+                                        <th className="w-1/5 text-right">Budgeted</th>
+                                        <th className="w-1/5 text-right">Activity</th>
+                                        <th className="w-1/5 text-right pr-4">Available</th>
+                                        <th className="w-20"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {/* Group header placeholder */}
+                                    {[0, 1].map((g) => (
+                                        <React.Fragment key={g}>
+                                            <tr className="animate-pulse">
+                                                <td className="py-2.5 pl-4">
+                                                    <div className="h-2.5 w-32 bg-muted/70 rounded" />
+                                                </td>
+                                                <td /><td /><td /><td />
+                                            </tr>
+                                            {[...Array(4)].map((_, i) => (
+                                                <tr key={i} className="animate-pulse">
+                                                    <td className="py-3 pl-8">
+                                                        <div className="h-3 bg-muted rounded" style={{ width: `${55 + (i * 13) % 30}%` }} />
+                                                    </td>
+                                                    <td className="py-3 text-right pr-3">
+                                                        <div className="h-3 w-14 bg-muted rounded ml-auto" />
+                                                    </td>
+                                                    <td className="py-3 text-right pr-3">
+                                                        <div className="h-3 w-14 bg-muted rounded ml-auto" />
+                                                    </td>
+                                                    <td className="py-3 text-right pr-4">
+                                                        <div className="h-3 w-14 bg-muted rounded ml-auto" />
+                                                    </td>
+                                                    <td />
+                                                </tr>
+                                            ))}
+                                        </React.Fragment>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </CardContent>
+                </Card>
             </div>
         )
     }
@@ -545,27 +619,33 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
                                                     </td>
                                                     <td className="text-center">
                                                         <div className="flex items-center justify-center gap-0.5">
-                                                            <button
-                                                                title="Set Goal"
-                                                                className={`p-1 rounded hover:bg-muted transition-colors ${category.goal ? 'text-primary' : 'text-muted-foreground/30 hover:text-muted-foreground'}`}
-                                                                onClick={() => setGoalModal({ categoryId: category.id, categoryName: category.name, goal: category.goal })}
-                                                            >
-                                                                <Target className="h-3.5 w-3.5" />
-                                                            </button>
-                                                            <button
-                                                                title="Rename"
-                                                                className="p-1 rounded hover:bg-muted text-muted-foreground/30 hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-all"
-                                                                onClick={() => setRenamingCategory({ id: category.id, name: category.name })}
-                                                            >
-                                                                <Pencil className="h-3.5 w-3.5" />
-                                                            </button>
-                                                            <button
-                                                                title="Delete"
-                                                                className="p-1 rounded hover:bg-destructive/10 text-muted-foreground/30 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
-                                                                onClick={() => handleDeleteCategory(category)}
-                                                            >
-                                                                <Trash2 className="h-3.5 w-3.5" />
-                                                            </button>
+                                                            {!category.is_system && (
+                                                                <button
+                                                                    title="Set Goal"
+                                                                    className={`p-1 rounded hover:bg-muted transition-colors ${category.goal ? 'text-primary' : 'text-muted-foreground/30 hover:text-muted-foreground'}`}
+                                                                    onClick={() => setGoalModal({ categoryId: category.id, categoryName: category.name, goal: category.goal })}
+                                                                >
+                                                                    <Target className="h-3.5 w-3.5" />
+                                                                </button>
+                                                            )}
+                                                            {!category.is_system && (
+                                                                <button
+                                                                    title="Rename"
+                                                                    className="p-1 rounded hover:bg-muted text-muted-foreground/30 hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-all"
+                                                                    onClick={() => setRenamingCategory({ id: category.id, name: category.name })}
+                                                                >
+                                                                    <Pencil className="h-3.5 w-3.5" />
+                                                                </button>
+                                                            )}
+                                                            {!category.is_system && (
+                                                                <button
+                                                                    title="Delete"
+                                                                    className="p-1 rounded hover:bg-destructive/10 text-muted-foreground/30 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
+                                                                    onClick={() => handleDeleteCategory(category)}
+                                                                >
+                                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     </td>
                                                 </tr>

@@ -25,6 +25,20 @@ import type { Account, Category } from '@/app/dashboard/dashboard'
 import { PayeeCombobox } from '@/app/dashboard/payee-combobox'
 import type { PayeeMeta } from '@/app/dashboard/payee-combobox'
 
+/**
+ * Passed to onTransactionAdded so callers can update balances locally
+ * without refetching the full account list from the server.
+ */
+export interface TransactionMutationInfo {
+    /** Signed amount as stored in DB (negative for expenses / transfer source) */
+    amount: number
+    type: 'income' | 'expense' | 'transfer'
+    /** Destination account ID for transfers, null otherwise */
+    to_account_id: string | null
+    /** Original amount before editing — used to compute delta for edits */
+    oldAmount?: number
+}
+
 export interface EditingTransaction {
     id: string
     account_id: string
@@ -53,7 +67,7 @@ interface AddTransactionModalProps {
     account: Account
     accounts: Account[]
     categories: Category[]
-    onTransactionAdded: () => void
+    onTransactionAdded: (info: TransactionMutationInfo) => void
     editing?: EditingTransaction | null
     currentMonth?: number
     currentYear?: number
@@ -262,7 +276,14 @@ export function AddTransactionModal({
                     setSplitMode(false)
                     setSplitRows([{ category_id: '', amount: '', memo: '' }, { category_id: '', amount: '', memo: '' }])
                 }
-                onTransactionAdded()
+                onTransactionAdded({
+                    amount: transactionAmount,
+                    type,
+                    // For existing transfer edits, the destination account comes from the editing prop
+                    to_account_id: (editing?.to_account_id ?? toAccountId) || null,
+                    // For edits, pass the original amount so callers can compute the delta
+                    oldAmount: editing?.amount,
+                })
                 onOpenChange(false)
             } else {
                 const err = await response.json()

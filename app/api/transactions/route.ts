@@ -49,7 +49,10 @@ export async function GET(request: NextRequest) {
         const result = (transactions ?? []).map((t) => {
             const cat = t.categories as any
             const payee = t.payees as any
-            const transferTx = t.transfer_tx as any
+            const rawTransferTx = t.transfer_tx
+            const transferTx = Array.isArray(rawTransferTx)
+                ? (rawTransferTx as any[])[0]
+                : rawTransferTx as any
             const rawSplits = (t.splits as any[]) ?? []
             const splits = rawSplits.map((s) => ({
                 id: s.id,
