@@ -399,15 +399,14 @@ export function TransactionsView({
             <div className="space-y-3">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h2 className="font-display text-xl font-bold text-foreground">{account.name}</h2>
+                        <h2 className="font-display text-xl font-bold text-foreground leading-normal">{account.name}</h2>
                         <p className="text-sm text-muted-foreground mt-0.5">{account.type_name}</p>
                     </div>
                     <div className="flex items-center gap-2">
                         <Button
-                            variant="ghost"
                             size="sm"
                             onClick={() => setShowReconcile(true)}
-                            className="h-8 px-3 text-xs text-muted-foreground hover:text-foreground"
+                            className="h-8 px-3 text-xs"
                         >
                             <Scale className="h-3.5 w-3.5 mr-1.5" />
                             Reconcile
@@ -736,6 +735,7 @@ export function TransactionsView({
                         // Balances are unaffected by reconciliation so no delta needed.
                         fetchTransactions(false)
                     }}
+                    initialClearedBalance={clearedBalance}
                 />
             )}
         </div>

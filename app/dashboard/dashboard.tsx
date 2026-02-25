@@ -37,12 +37,6 @@ export interface Category {
 
 export type ViewType = 'budget' | 'transactions' | 'scheduled' | 'reports'
 
-const VIEW_LABELS: Record<ViewType, string> = {
-    budget: 'Budget',
-    transactions: 'Transactions',
-    scheduled: 'Scheduled',
-    reports: 'Reports',
-}
 
 export function Dashboard() {
     const { accessToken } = useAuth()
@@ -225,10 +219,9 @@ export function Dashboard() {
                 />
 
                 <div className="flex-1 flex flex-col min-w-0">
-                    {/* Sub-header: month nav + view tabs */}
-                    <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card/40 backdrop-blur-sm">
-                        {/* Month navigator — only shown on Budget view */}
-                        {currentView === 'budget' ? (
+                    {/* Sub-header: only shown on budget view for month nav + utilities */}
+                    {currentView === 'budget' && (
+                        <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card/40 backdrop-blur-sm">
                             <div className="flex items-center gap-2">
                                 <button
                                     onClick={() => handleMonthChange('prev')}
@@ -248,25 +241,6 @@ export function Dashboard() {
                                     <ChevronRight className="h-4 w-4" />
                                 </button>
                             </div>
-                        ) : <div />}
-
-                        {/* View tabs + utilities */}
-                        <div className="flex items-center gap-2">
-                            <div className="flex items-center gap-0.5 bg-secondary rounded-lg p-1">
-                                {(Object.keys(VIEW_LABELS) as ViewType[]).map((view) => (
-                                    <button
-                                        key={view}
-                                        onClick={() => setCurrentView(view)}
-                                        className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition-all duration-150 ${
-                                            currentView === view
-                                                ? 'bg-card text-foreground shadow-sm'
-                                                : 'text-muted-foreground hover:text-foreground'
-                                        }`}
-                                    >
-                                        {VIEW_LABELS[view]}
-                                    </button>
-                                ))}
-                            </div>
 
                             <button
                                 onClick={() => setShowManagePayees(true)}
@@ -276,7 +250,7 @@ export function Dashboard() {
                                 <Users className="h-4 w-4" />
                             </button>
                         </div>
-                    </div>
+                    )}
 
                     {/* View content */}
                     <div className="flex-1 pt-8 px-6 pb-6 overflow-auto">

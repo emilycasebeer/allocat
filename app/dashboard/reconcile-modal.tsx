@@ -4,11 +4,9 @@ import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
     Dialog,
     DialogContent,
-    DialogDescription,
     DialogFooter,
     DialogHeader,
     DialogTitle,
@@ -29,49 +27,96 @@ interface ReconcileModalProps {
     onOpenChange: (open: boolean) => void
     account: Account
     onReconciled: () => void
+    initialClearedBalance: number
 }
 
-export function ReconcileModal({ open, onOpenChange, account, onReconciled }: ReconcileModalProps) {
+const fmtMoney = (n: number) => {
+    const abs = `$${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    return n < 0 ? `-${abs}` : abs
+}
+
+const formatDate = (dateString: string) => {
+    const d = new Date(dateString + 'T00:00:00')
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+export function ReconcileModal({ open, onOpenChange, account, onReconciled, initialClearedBalance }: ReconcileModalProps) {
     const { accessToken } = useAuth()
     const accessTokenRef = useRef<string | null>(null)
     accessTokenRef.current = accessToken
 
+    // step 1 = balance confirmation, 2 = enter actual balance, 3 = transaction review
+    const [step, setStep] = useState<1 | 2 | 3>(1)
+    const [bankBalanceInput, setBankBalanceInput] = useState('')
+    // The confirmed statement balance (set when advancing to step 3)
+    const [bankBalance, setBankBalance] = useState(0)
+    // Whether the user arrived at step 3 via "Yes" (already balanced)
+    const [fromYes, setFromYes] = useState(false)
+
     const [transactions, setTransactions] = useState<UnclearedTransaction[]>([])
-    const [clearedBalance, setClearedBalance] = useState(0)
-    const [bankBalance, setBankBalance] = useState('')
-    const [loading, setLoading] = useState(true)
+    const [liveClearedBalance, setLiveClearedBalance] = useState(initialClearedBalance)
+    const [loading, setLoading] = useState(false)
     const [finishing, setFinishing] = useState(false)
 
+    // Reset all state whenever the modal opens
     useEffect(() => {
-        if (!open) return
-        fetchTransactions()
-    }, [open])
+        if (open) {
+            setStep(1)
+            setBankBalanceInput('')
+            setBankBalance(0)
+            setFromYes(false)
+            setTransactions([])
+            setLiveClearedBalance(initialClearedBalance)
+            setLoading(false)
+            setFinishing(false)
+        }
+    }, [open, initialClearedBalance])
 
-    const fetchTransactions = async () => {
+    // Fetch all transactions, compute fresh cleared balance, extract uncleared list
+    const fetchStep3Data = async () => {
         setLoading(true)
         try {
             const token = accessTokenRef.current
             if (!token) return
-
-            // Fetch all transactions for this account (both cleared/reconciled for balance, uncleared to show)
             const response = await fetch(`/api/transactions?account_id=${account.id}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
+                headers: { 'Authorization': `Bearer ${token}` },
             })
-
             if (!response.ok) return
             const { transactions: all } = await response.json()
-
             const cleared = (all as UnclearedTransaction[])
                 .filter(t => t.cleared === 'cleared' || t.cleared === 'reconciled')
                 .reduce((sum, t) => sum + t.amount, 0)
-            setClearedBalance(cleared)
-
-            // Show only uncleared transactions for the user to check off
+            setLiveClearedBalance(cleared)
             setTransactions((all as UnclearedTransaction[]).filter(t => t.cleared === 'uncleared'))
         } catch (error) {
             console.error('Error fetching transactions:', error)
         } finally {
             setLoading(false)
+        }
+    }
+
+    const handleYes = () => {
+        setBankBalance(initialClearedBalance)
+        setFromYes(true)
+        setStep(3)
+        fetchStep3Data()
+    }
+
+    const handleNo = () => setStep(2)
+
+    const handleNext = () => {
+        const parsed = parseFloat(bankBalanceInput)
+        if (isNaN(parsed)) return
+        setBankBalance(parsed)
+        setStep(3)
+        fetchStep3Data()
+    }
+
+    const handleBackFromStep3 = () => {
+        if (fromYes) {
+            setStep(1)
+        } else {
+            setStep(2)
         }
     }
 
@@ -83,11 +128,11 @@ export function ReconcileModal({ open, onOpenChange, account, onReconciled }: Re
             const response = await fetch(`/api/transactions/${tx.id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ cleared: newCleared })
+                body: JSON.stringify({ cleared: newCleared }),
             })
             if (response.ok) {
-                const amountDelta = newCleared === 'cleared' ? tx.amount : -tx.amount
-                setClearedBalance(prev => prev + amountDelta)
+                const delta = newCleared === 'cleared' ? tx.amount : -tx.amount
+                setLiveClearedBalance(prev => prev + delta)
                 setTransactions(prev => prev.map(t =>
                     t.id === tx.id ? { ...t, cleared: newCleared } : t
                 ))
@@ -102,13 +147,11 @@ export function ReconcileModal({ open, onOpenChange, account, onReconciled }: Re
         try {
             const token = accessTokenRef.current
             if (!token) return
-
             const response = await fetch(`/api/accounts/${account.id}/reconcile`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ balance: parseFloat(bankBalance), create_adjustment: createAdjustment })
+                body: JSON.stringify({ balance: bankBalance, create_adjustment: createAdjustment }),
             })
-
             if (response.ok) {
                 onReconciled()
                 onOpenChange(false)
@@ -123,116 +166,186 @@ export function ReconcileModal({ open, onOpenChange, account, onReconciled }: Re
         }
     }
 
-    const parsedBankBalance = parseFloat(bankBalance) || 0
-    const difference = parsedBankBalance - clearedBalance
+    const parsedBankBalanceInput = parseFloat(bankBalanceInput)
+    const step2Difference = !isNaN(parsedBankBalanceInput) ? parsedBankBalanceInput - initialClearedBalance : null
+    const difference = bankBalance - liveClearedBalance
     const isBalanced = Math.abs(difference) < 0.005
-
-    const formatDate = (dateString: string) => {
-        const d = new Date(dateString + 'T00:00:00')
-        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    }
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col">
+            <DialogContent className="sm:max-w-[640px] max-h-[90vh] flex flex-col">
                 <DialogHeader>
                     <DialogTitle>Reconcile — {account.name}</DialogTitle>
-                    <DialogDescription>
-                        Check off transactions that appear on your bank statement, then enter your statement ending balance.
-                    </DialogDescription>
                 </DialogHeader>
 
-                <div className="grid grid-cols-3 gap-4 py-2 text-center border-b">
-                    <div>
-                        <div className="text-xs text-gray-500 mb-1">Cleared Balance</div>
-                        <div className={`text-lg font-semibold ${clearedBalance < 0 ? 'text-red-700' : 'text-gray-900'}`}>
-                            ${clearedBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {/* ── Step 1: Balance Confirmation ───────────────────────── */}
+                {step === 1 && (
+                    <div className="flex-1 flex flex-col items-center justify-center gap-6 py-10">
+                        <p className="text-sm text-muted-foreground">Is your current cleared balance</p>
+                        <div className={`font-display text-4xl font-bold tabular-nums ${initialClearedBalance < 0 ? 'text-destructive' : 'text-foreground'}`}>
+                            {fmtMoney(initialClearedBalance)}
+                        </div>
+                        <div className="flex flex-col gap-3 w-full max-w-xs pt-2">
+                            <Button onClick={handleYes} className="w-full">
+                                Yes
+                            </Button>
+                            <Button variant="outline" onClick={handleNo} className="w-full">
+                                No
+                            </Button>
                         </div>
                     </div>
-                    <div>
-                        <div className="text-xs text-gray-500 mb-1">Bank Balance</div>
-                        <Input
-                            type="number"
-                            step="0.01"
-                            placeholder="0.00"
-                            value={bankBalance}
-                            onChange={(e) => setBankBalance(e.target.value)}
-                            className="text-center h-8"
-                        />
-                    </div>
-                    <div>
-                        <div className="text-xs text-gray-500 mb-1">Difference</div>
-                        <div className={`text-lg font-semibold ${isBalanced ? 'text-green-600' : 'text-red-600'}`}>
-                            ${Math.abs(difference).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            {!isBalanced && (difference > 0 ? ' over' : ' under')}
-                        </div>
-                    </div>
-                </div>
+                )}
 
-                <div className="flex-1 overflow-y-auto min-h-0">
-                    {loading ? (
-                        <div className="flex items-center justify-center py-8">
-                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                {/* ── Step 2: Enter Actual Balance ────────────────────────── */}
+                {step === 2 && (
+                    <div className="flex-1 flex flex-col gap-5 py-2">
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-foreground">Statement Ending Balance</label>
+                            <Input
+                                type="number"
+                                step="0.01"
+                                placeholder="0.00"
+                                value={bankBalanceInput}
+                                onChange={(e) => setBankBalanceInput(e.target.value)}
+                                autoFocus
+                                className="text-center text-lg h-11"
+                            />
                         </div>
-                    ) : transactions.length === 0 ? (
-                        <div className="text-center py-8 text-gray-500 text-sm">
-                            No uncleared transactions.
-                        </div>
-                    ) : (
-                        <table className="w-full text-sm">
-                            <thead>
-                                <tr className="border-b border-gray-200">
-                                    <th className="text-left py-2 px-3 font-medium text-gray-600 w-8">✓</th>
-                                    <th className="text-left py-2 px-3 font-medium text-gray-600">Date</th>
-                                    <th className="text-left py-2 px-3 font-medium text-gray-600">Payee / Memo</th>
-                                    <th className="text-right py-2 px-3 font-medium text-gray-600">Amount</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {transactions.map((tx) => (
-                                    <tr
-                                        key={tx.id}
-                                        className={`border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${tx.cleared === 'cleared' ? 'bg-green-50' : ''}`}
-                                        onClick={() => handleToggleCleared(tx)}
-                                    >
-                                        <td className="py-2 px-3 text-center text-green-600 font-bold">
-                                            {tx.cleared === 'cleared' ? '✓' : ''}
-                                        </td>
-                                        <td className="py-2 px-3 text-gray-700">{formatDate(tx.date)}</td>
-                                        <td className="py-2 px-3 text-gray-700">
-                                            {tx.payee_name || tx.memo || <span className="text-gray-400 italic">—</span>}
-                                        </td>
-                                        <td className={`py-2 px-3 text-right font-medium ${tx.amount >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                                            {tx.amount >= 0 ? '+' : '-'}${Math.abs(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    )}
-                </div>
 
-                <DialogFooter className="flex items-center gap-2 pt-2 border-t">
-                    <Button variant="outline" onClick={() => onOpenChange(false)} disabled={finishing}>
-                        Cancel
-                    </Button>
-                    {!isBalanced && bankBalance ? (
-                        <Button
-                            onClick={() => handleFinish(true)}
-                            disabled={finishing}
-                            className="bg-amber-600 hover:bg-amber-700"
-                        >
-                            {finishing ? 'Finishing...' : `Finish with $${Math.abs(difference).toFixed(2)} Adjustment`}
-                        </Button>
-                    ) : (
-                        <Button
-                            onClick={() => handleFinish(false)}
-                            disabled={!isBalanced || !bankBalance || finishing}
-                        >
-                            {finishing ? 'Finishing...' : 'Finish Reconciling'}
-                        </Button>
-                    )}
-                </DialogFooter>
+                        {step2Difference !== null && (
+                            <div className="text-center py-2">
+                                <p className="text-xs text-muted-foreground mb-1">Difference</p>
+                                <p className={`font-display text-2xl font-bold tabular-nums ${Math.abs(step2Difference) < 0.005 ? 'text-primary' : 'text-destructive'}`}>
+                                    {fmtMoney(step2Difference)}
+                                </p>
+                            </div>
+                        )}
+
+                        <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground space-y-2">
+                            <p>The balance recorded in allocat doesn't match the balance at your financial institution.</p>
+                            <p>
+                                <span className="font-medium text-foreground">To correct this</span>, compare each uncleared
+                                transaction against your account to make sure they match. allocat will keep track of the
+                                current difference at the top of your register.
+                            </p>
+                            <p>If you can't find the difference, that's okay! We'll make an adjustment transaction and you can move on.</p>
+                        </div>
+
+                        <DialogFooter className="pt-2 border-t mt-auto">
+                            <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
+                            <Button
+                                onClick={handleNext}
+                                disabled={!bankBalanceInput || isNaN(parseFloat(bankBalanceInput))}
+                            >
+                                Next
+                            </Button>
+                        </DialogFooter>
+                    </div>
+                )}
+
+                {/* ── Step 3: Transaction Review ───────────────────────────── */}
+                {step === 3 && (
+                    <>
+                        {/* Balance summary row */}
+                        <div className="grid grid-cols-3 gap-4 py-3 text-center border-b">
+                            <div>
+                                <div className="text-xs text-muted-foreground mb-1">Cleared Balance</div>
+                                <div className={`text-lg font-semibold tabular-nums ${liveClearedBalance < 0 ? 'text-destructive' : 'text-foreground'}`}>
+                                    {fmtMoney(liveClearedBalance)}
+                                </div>
+                            </div>
+                            <div>
+                                <div className="text-xs text-muted-foreground mb-1">Statement Balance</div>
+                                <div className="text-lg font-semibold tabular-nums">
+                                    {fmtMoney(bankBalance)}
+                                </div>
+                            </div>
+                            <div>
+                                <div className="text-xs text-muted-foreground mb-1">Difference</div>
+                                <div className={`text-lg font-semibold tabular-nums ${isBalanced ? 'text-primary' : 'text-destructive'}`}>
+                                    {fmtMoney(difference)}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Uncleared transaction list */}
+                        <div className="flex-1 overflow-y-auto min-h-0">
+                            {loading ? (
+                                <div className="flex items-center justify-center py-10">
+                                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
+                                </div>
+                            ) : transactions.length === 0 ? (
+                                <div className="text-center py-10 text-muted-foreground text-sm">
+                                    No uncleared transactions.
+                                </div>
+                            ) : (
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b" style={{ borderColor: 'hsl(var(--border))' }}>
+                                            <th className="text-left py-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground w-8">✓</th>
+                                            <th className="text-left py-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Date</th>
+                                            <th className="text-left py-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Payee / Memo</th>
+                                            <th className="text-right py-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Amount</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {transactions.map((tx) => (
+                                            <tr
+                                                key={tx.id}
+                                                className={`border-b cursor-pointer transition-colors ${
+                                                    tx.cleared === 'cleared'
+                                                        ? 'bg-primary/5 hover:bg-primary/10'
+                                                        : 'hover:bg-muted/40'
+                                                }`}
+                                                style={{ borderColor: 'hsl(var(--border) / 0.5)' }}
+                                                onClick={() => handleToggleCleared(tx)}
+                                            >
+                                                <td className="py-2 px-3 text-center">
+                                                    {tx.cleared === 'cleared' && (
+                                                        <span className="text-primary font-bold text-base">✓</span>
+                                                    )}
+                                                </td>
+                                                <td className="py-2 px-3 text-muted-foreground whitespace-nowrap">
+                                                    {formatDate(tx.date)}
+                                                </td>
+                                                <td className="py-2 px-3 text-foreground/80">
+                                                    {tx.payee_name || tx.memo || (
+                                                        <span className="text-muted-foreground/40 italic">—</span>
+                                                    )}
+                                                </td>
+                                                <td className={`py-2 px-3 text-right font-semibold tabular-nums ${tx.amount >= 0 ? 'text-primary/90' : 'text-destructive/90'}`}>
+                                                    {tx.amount >= 0 ? '+' : '-'}${Math.abs(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+
+                        <DialogFooter className="flex items-center gap-2 pt-2 border-t">
+                            <Button variant="outline" onClick={handleBackFromStep3} disabled={finishing}>
+                                Back
+                            </Button>
+                            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={finishing}>
+                                Cancel
+                            </Button>
+                            {isBalanced ? (
+                                <Button onClick={() => handleFinish(false)} disabled={finishing}>
+                                    {finishing ? 'Finishing…' : 'Finish Reconciling'}
+                                </Button>
+                            ) : (
+                                <Button
+                                    onClick={() => handleFinish(true)}
+                                    disabled={finishing}
+                                    className="bg-amber-600 hover:bg-amber-700 text-white"
+                                >
+                                    {finishing ? 'Finishing…' : 'Create Adjustment & Finish'}
+                                </Button>
+                            )}
+                        </DialogFooter>
+                    </>
+                )}
             </DialogContent>
         </Dialog>
     )
