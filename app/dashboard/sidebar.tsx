@@ -1,10 +1,20 @@
 'use client'
 
-import { useState } from 'react'
-import { Plus, LayoutList, BarChart3, Landmark, ChevronDown, ChevronRight, CalendarClock, Users } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Plus, LayoutList, BarChart3, Landmark, ChevronDown, ChevronRight, CalendarClock, Users, LogOut, User } from 'lucide-react'
 import { AddAccountModal } from '@/app/dashboard/add-account-modal'
 import type { Account } from '@/app/dashboard/dashboard'
 import Decimal from 'decimal.js'
+import { useAuth, supabase } from '../providers'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 interface SidebarProps {
     accounts: Account[]
@@ -80,8 +90,8 @@ function AccountGroup({
             >
                 <div className="flex items-center gap-1.5">
                     {collapsed
-                        ? <ChevronRight className="h-3 w-3 text-primary/50 flex-shrink-0" />
-                        : <ChevronDown className="h-3 w-3 text-primary/50 flex-shrink-0" />
+                        ? <ChevronRight className="h-3 w-3 text-muted-foreground/40 flex-shrink-0" />
+                        : <ChevronDown className="h-3 w-3 text-muted-foreground/40 flex-shrink-0" />
                     }
                     <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/50">
                         {label}
@@ -119,6 +129,18 @@ function AccountGroup({
 
 export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountAdded, currentView, onViewChange, onManagePayees }: SidebarProps) {
     const [showAddAccount, setShowAddAccount] = useState(false)
+    const { user, signOut } = useAuth()
+    const [displayName, setDisplayName] = useState<string | null>(null)
+
+    useEffect(() => {
+        if (!user) return
+        supabase
+            .from('profiles')
+            .select('display_name')
+            .eq('id', user.id)
+            .single()
+            .then(({ data }) => setDisplayName(data?.display_name ?? null))
+    }, [user?.id])
 
     const { cash, credit, tracking, closed } = groupAccounts(accounts)
 
@@ -130,11 +152,20 @@ export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountA
 
     const isAllAccounts = currentView === 'transactions' && selectedAccount === null
 
+    const getUserInitials = (email: string) => email.substring(0, 2).toUpperCase()
+
     return (
-        <div
-            className="w-60 bg-card border-r border-border flex flex-col flex-shrink-0"
-            style={{ minHeight: 'calc(100vh - 57px)' }}
-        >
+        <div className="w-60 bg-card border-r border-border flex flex-col h-screen sticky top-0 flex-shrink-0">
+            {/* Brand */}
+            <div className="flex items-center gap-2.5 px-4 py-4 border-b border-border">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 border border-primary/25">
+                    <span className="text-sm leading-none">🐱</span>
+                </div>
+                <span className="font-display text-lg font-bold tracking-tight text-foreground">
+                    allo<span className="text-primary">cat</span>
+                </span>
+            </div>
+
             <div className="flex-1 overflow-y-auto px-2 py-3">
                 {/* Top navigation */}
                 <div className="space-y-px mb-3">
@@ -188,7 +219,7 @@ export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountA
                     </div>
                 )}
 
-                {/* Add Account — sits just below the last account */}
+                {/* Add Account */}
                 <div className="mt-3 px-1">
                     <button
                         onClick={() => setShowAddAccount(true)}
@@ -198,6 +229,47 @@ export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountA
                         Add Account
                     </button>
                 </div>
+            </div>
+
+            {/* User menu — bottom of sidebar */}
+            <div className="border-t border-border p-2">
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-all">
+                            <Avatar className="h-6 w-6 flex-shrink-0">
+                                <AvatarFallback className="bg-primary/15 text-primary text-[10px] font-semibold font-display">
+                                    {displayName ? displayName.substring(0, 2).toUpperCase() : user?.email ? getUserInitials(user.email) : 'U'}
+                                </AvatarFallback>
+                            </Avatar>
+                            <span className="truncate">{displayName ?? user?.email ?? 'Account'}</span>
+                        </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-56" align="end" side="top" forceMount>
+                        <DropdownMenuLabel className="font-normal">
+                            <div className="flex flex-col space-y-1">
+                                <p className="text-sm font-medium leading-none truncate">
+                                    {user?.email || 'User'}
+                                </p>
+                                <p className="text-xs leading-none text-muted-foreground">
+                                    Budget Manager
+                                </p>
+                            </div>
+                        </DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem className="focus:bg-primary focus:text-primary-foreground">
+                            <User className="mr-2 h-4 w-4" />
+                            <span>Settings</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                            onClick={signOut}
+                            className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                        >
+                            <LogOut className="mr-2 h-4 w-4" />
+                            <span>Log out</span>
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
             </div>
 
             <AddAccountModal

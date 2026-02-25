@@ -3,7 +3,6 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { useAuth } from '../providers'
-import { TopNav } from '@/app/dashboard/top-nav'
 import { Sidebar } from '@/app/dashboard/sidebar'
 import { BudgetView } from '@/app/dashboard/budget-view'
 import { TransactionsView } from '@/app/dashboard/transactions-view'
@@ -204,8 +203,6 @@ export function Dashboard() {
 
     return (
         <div className="min-h-screen bg-background flex flex-col">
-            <TopNav />
-
             <div className="flex flex-1 overflow-hidden">
                 <Sidebar
                     accounts={accounts}
