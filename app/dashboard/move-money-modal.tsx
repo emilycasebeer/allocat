@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { supabase } from '../providers'
+import { useState, useRef } from 'react'
+import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -29,6 +29,10 @@ interface MoveMoneModalProps {
 }
 
 export function MoveMoneyModal({ open, onOpenChange, budgetSummary, onMoved }: MoveMoneModalProps) {
+    const { accessToken } = useAuth()
+    const accessTokenRef = useRef<string | null>(null)
+    accessTokenRef.current = accessToken
+
     const [fromId, setFromId] = useState('')
     const [toId, setToId] = useState('')
     const [amount, setAmount] = useState('')
@@ -46,12 +50,12 @@ export function MoveMoneyModal({ open, onOpenChange, budgetSummary, onMoved }: M
 
         setLoading(true)
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             const headers = {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${session.access_token}`,
+                'Authorization': `Bearer ${token}`,
             }
 
             const fromNew = new Decimal(fromCategory!.budgeted_amount).minus(moveAmount).toNumber()

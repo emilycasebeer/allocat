@@ -1,7 +1,7 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import { supabase } from '../providers'
+import React, { useState, useEffect, useRef } from 'react'
+import { useAuth } from '../providers'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts'
@@ -37,6 +37,10 @@ interface ReportsViewProps {
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D', '#FFC0CB', '#DDA0DD', '#98D8C8', '#F7DC6F']
 
 export function ReportsView({ month, year }: ReportsViewProps) {
+    const { accessToken } = useAuth()
+    const accessTokenRef = useRef<string | null>(null)
+    accessTokenRef.current = accessToken
+
     const [spendingByCategory, setSpendingByCategory] = useState<SpendingByCategory[]>([])
     const [budgetVsActual, setBudgetVsActual] = useState<BudgetVsActual[]>([])
     const [netWorthData, setNetWorthData] = useState<NetWorthData[]>([])
@@ -50,8 +54,8 @@ export function ReportsView({ month, year }: ReportsViewProps) {
 
     const fetchReportsData = async () => {
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             setLoading(true)
 
@@ -71,12 +75,12 @@ export function ReportsView({ month, year }: ReportsViewProps) {
 
     const fetchSpendingByCategory = async () => {
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             const response = await fetch(`/api/reports/spending?month=${month}&year=${year}`, {
                 headers: {
-                    'Authorization': `Bearer ${session.access_token}`
+                    'Authorization': `Bearer ${token}`
                 }
             })
 
@@ -96,12 +100,12 @@ export function ReportsView({ month, year }: ReportsViewProps) {
 
     const fetchBudgetVsActual = async () => {
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             const response = await fetch(`/api/reports/budget-vs-actual?month=${month}&year=${year}`, {
                 headers: {
-                    'Authorization': `Bearer ${session.access_token}`
+                    'Authorization': `Bearer ${token}`
                 }
             })
 
@@ -116,12 +120,12 @@ export function ReportsView({ month, year }: ReportsViewProps) {
 
     const fetchNetWorth = async () => {
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             const response = await fetch(`/api/reports/net-worth?months=${selectedPeriod}`, {
                 headers: {
-                    'Authorization': `Bearer ${session.access_token}`
+                    'Authorization': `Bearer ${token}`
                 }
             })
 
@@ -136,12 +140,12 @@ export function ReportsView({ month, year }: ReportsViewProps) {
 
     const fetchIncomeVsExpenses = async () => {
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             const response = await fetch(`/api/reports/income-vs-expenses?months=${selectedPeriod}`, {
                 headers: {
-                    'Authorization': `Bearer ${session.access_token}`
+                    'Authorization': `Bearer ${token}`
                 }
             })
 

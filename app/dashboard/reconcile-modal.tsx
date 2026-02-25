@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { supabase } from '../providers'
+import { useState, useEffect, useRef } from 'react'
+import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -32,6 +32,10 @@ interface ReconcileModalProps {
 }
 
 export function ReconcileModal({ open, onOpenChange, account, onReconciled }: ReconcileModalProps) {
+    const { accessToken } = useAuth()
+    const accessTokenRef = useRef<string | null>(null)
+    accessTokenRef.current = accessToken
+
     const [transactions, setTransactions] = useState<UnclearedTransaction[]>([])
     const [clearedBalance, setClearedBalance] = useState(0)
     const [bankBalance, setBankBalance] = useState('')
@@ -46,12 +50,12 @@ export function ReconcileModal({ open, onOpenChange, account, onReconciled }: Re
     const fetchTransactions = async () => {
         setLoading(true)
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             // Fetch all transactions for this account (both cleared/reconciled for balance, uncleared to show)
             const response = await fetch(`/api/transactions?account_id=${account.id}`, {
-                headers: { 'Authorization': `Bearer ${session.access_token}` }
+                headers: { 'Authorization': `Bearer ${token}` }
             })
 
             if (!response.ok) return
@@ -74,11 +78,11 @@ export function ReconcileModal({ open, onOpenChange, account, onReconciled }: Re
     const handleToggleCleared = async (tx: UnclearedTransaction) => {
         const newCleared = tx.cleared === 'uncleared' ? 'cleared' : 'uncleared'
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
             const response = await fetch(`/api/transactions/${tx.id}`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ cleared: newCleared })
             })
             if (response.ok) {
@@ -96,12 +100,12 @@ export function ReconcileModal({ open, onOpenChange, account, onReconciled }: Re
     const handleFinish = async (createAdjustment: boolean) => {
         setFinishing(true)
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             const response = await fetch(`/api/accounts/${account.id}/reconcile`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ balance: parseFloat(bankBalance), create_adjustment: createAdjustment })
             })
 

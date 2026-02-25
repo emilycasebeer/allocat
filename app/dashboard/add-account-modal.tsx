@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { supabase } from '../providers'
+import { useState, useRef } from 'react'
+import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -43,6 +43,10 @@ interface AddAccountModalProps {
 }
 
 export function AddAccountModal({ open, onOpenChange, onAccountAdded }: AddAccountModalProps) {
+    const { accessToken } = useAuth()
+    const accessTokenRef = useRef<string | null>(null)
+    accessTokenRef.current = accessToken
+
     const [name, setName] = useState('')
     const [typeName, setTypeName] = useState<string>('')
     const [startingBalance, setStartingBalance] = useState('')
@@ -54,14 +58,14 @@ export function AddAccountModal({ open, onOpenChange, onAccountAdded }: AddAccou
 
         setLoading(true)
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             const response = await fetch('/api/accounts', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`
+                    'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify({
                     name,

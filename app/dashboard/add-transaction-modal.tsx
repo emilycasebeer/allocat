@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { supabase } from '../providers'
+import { useState, useEffect, useRef } from 'react'
+import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -84,6 +84,10 @@ export function AddTransactionModal({
     currentMonth,
     currentYear,
 }: AddTransactionModalProps) {
+    const { accessToken } = useAuth()
+    const accessTokenRef = useRef<string | null>(null)
+    accessTokenRef.current = accessToken
+
     const [memo, setMemo] = useState('')
     const [amount, setAmount] = useState('')
     const [date, setDate] = useState(new Date().toISOString().split('T')[0])
@@ -145,13 +149,13 @@ export function AddTransactionModal({
 
     useEffect(() => {
         if (!open) return
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (!session) return
-            fetch('/api/payees', { headers: { 'Authorization': `Bearer ${session.access_token}` } })
+        const token = accessTokenRef.current
+        if (token) {
+            fetch('/api/payees', { headers: { 'Authorization': `Bearer ${token}` } })
                 .then(r => r.ok ? r.json() : null)
                 .then(data => { if (data?.payees) setPayees(data.payees) })
                 .catch(() => {})
-        })
+        }
     }, [open])
 
     // Only show non-system categories in the picker
@@ -207,8 +211,8 @@ export function AddTransactionModal({
 
         setLoading(true)
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             let transactionAmount = parseFloat(amount)
             if (type === 'expense') {
@@ -259,7 +263,7 @@ export function AddTransactionModal({
                 method,
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`
+                    'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify(editing ? body : { ...body, account_id: account.id })
             })

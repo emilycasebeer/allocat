@@ -1,13 +1,12 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
-import { supabase } from '../providers'
+import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import {
-    Plus, TrendingUp, TrendingDown, ArrowLeftRight,
-    Pencil, Trash2, Scale, ChevronDown, ChevronRight, Search, X, Lock,
+    Plus, Pencil, Trash2, Scale, ChevronDown, ChevronRight, Search, X, Lock,
 } from 'lucide-react'
 import { AddTransactionModal } from '@/app/dashboard/add-transaction-modal'
 import type { EditingTransaction, TransactionMutationInfo } from '@/app/dashboard/add-transaction-modal'
@@ -88,19 +87,13 @@ function ClearedDot({ cleared, onClick }: { cleared: Transaction['cleared']; onC
 
 const formatDate = (dateString: string) => {
     const date = new Date(dateString + 'T00:00:00')
-    const now = new Date()
-    if (date.toDateString() === now.toDateString()) return 'Today'
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    const mm = String(date.getMonth() + 1).padStart(2, '0')
+    const dd = String(date.getDate()).padStart(2, '0')
+    return `${mm}/${dd}/${date.getFullYear()}`
 }
 
 const formatAmount = (amount: number) =>
     `$${Math.abs(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-
-const getTypeIcon = (type: string) => {
-    if (type === 'income') return <TrendingUp className="h-3.5 w-3.5 text-primary" />
-    if (type === 'expense') return <TrendingDown className="h-3.5 w-3.5 text-destructive" />
-    return <ArrowLeftRight className="h-3.5 w-3.5 text-accent" />
-}
 
 export function TransactionsView({
     account, accounts, categories, onBalanceDelta, currentMonth, currentYear
@@ -116,6 +109,10 @@ export function TransactionsView({
     const [clearedFilter, setClearedFilter] = useState<'all' | 'uncleared' | 'cleared' | 'reconciled'>('all')
     const [startDate, setStartDate] = useState('')
     const [endDate, setEndDate] = useState('')
+
+    const { accessToken } = useAuth()
+    const accessTokenRef = useRef<string | null>(null)
+    accessTokenRef.current = accessToken
 
     // Account-keyed transaction cache — persists across account switches while this
     // component remains mounted (Dashboard always renders it, hidden when not active).
@@ -134,10 +131,10 @@ export function TransactionsView({
         const accountId = acc.id
         if (!background) setLoading(true)
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) { if (!background) setLoading(false); return }
+            const token = accessTokenRef.current
+            if (!token) { if (!background) setLoading(false); return }
             const response = await fetch(`/api/transactions?account_id=${accountId}`, {
-                headers: { 'Authorization': `Bearer ${session.access_token}` },
+                headers: { 'Authorization': `Bearer ${token}` },
             })
             if (response.ok) {
                 const { transactions: data } = await response.json()
@@ -203,11 +200,11 @@ export function TransactionsView({
         onBalanceDelta(deltas)
 
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
             const response = await fetch(`/api/transactions/${transaction.id}`, {
                 method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${session.access_token}` },
+                headers: { 'Authorization': `Bearer ${token}` },
             })
             if (!response.ok) {
                 // Revert optimistic changes
@@ -236,11 +233,11 @@ export function TransactionsView({
             t.id === transaction.id ? { ...t, cleared: newCleared } : t
         ))
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
             await fetch(`/api/transactions/${transaction.id}`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ cleared: newCleared }),
             })
             // No balance delta needed — cleared status doesn't change the account balance
@@ -264,19 +261,21 @@ export function TransactionsView({
 
     const hasActiveFilters = searchText || clearedFilter !== 'all' || startDate || endDate
 
-    const filteredTransactions = transactions.filter(t => {
-        if (filterType !== 'all' && t.type !== filterType) return false
-        if (clearedFilter !== 'all' && t.cleared !== clearedFilter) return false
-        if (startDate && t.date < startDate) return false
-        if (endDate && t.date > endDate) return false
-        if (searchText) {
-            const q = searchText.toLowerCase()
-            const inPayee = t.payee_name?.toLowerCase().includes(q) ?? false
-            const inMemo = t.memo?.toLowerCase().includes(q) ?? false
-            if (!inPayee && !inMemo) return false
-        }
-        return true
-    })
+    const filteredTransactions = transactions
+        .filter(t => {
+            if (filterType !== 'all' && t.type !== filterType) return false
+            if (clearedFilter !== 'all' && t.cleared !== clearedFilter) return false
+            if (startDate && t.date < startDate) return false
+            if (endDate && t.date > endDate) return false
+            if (searchText) {
+                const q = searchText.toLowerCase()
+                const inPayee = t.payee_name?.toLowerCase().includes(q) ?? false
+                const inMemo = t.memo?.toLowerCase().includes(q) ?? false
+                if (!inPayee && !inMemo) return false
+            }
+            return true
+        })
+        .sort((a, b) => b.date.localeCompare(a.date))
 
     const clearFilters = () => {
         setSearchText('')
@@ -329,12 +328,12 @@ export function TransactionsView({
                                 <thead>
                                     <tr style={{ backgroundColor: 'hsl(var(--secondary))' }}>
                                         <th className="w-8 py-3 px-3" />
-                                        <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Date</th>
+                                        <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground w-28">Date</th>
                                         <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Payee</th>
                                         <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Category</th>
                                         <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Memo</th>
-                                        <th className="text-right py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Amount</th>
-                                        <th className="text-center py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground w-20">Type</th>
+                                        <th className="text-right py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground w-28">Outflow</th>
+                                        <th className="text-right py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground w-28">Inflow</th>
                                         <th className="w-16" />
                                     </tr>
                                 </thead>
@@ -357,10 +356,10 @@ export function TransactionsView({
                                                 <div className="h-3 w-20 bg-muted rounded" />
                                             </td>
                                             <td className="py-3 px-3 text-right">
-                                                <div className="h-3 w-14 bg-muted rounded ml-auto" />
+                                                {i % 3 !== 0 && <div className="h-3 w-14 bg-muted rounded ml-auto" />}
                                             </td>
-                                            <td className="py-3 px-3">
-                                                <div className="h-3.5 w-3.5 bg-muted rounded mx-auto" />
+                                            <td className="py-3 px-3 text-right">
+                                                {i % 3 === 0 && <div className="h-3 w-14 bg-muted rounded ml-auto" />}
                                             </td>
                                             <td />
                                         </tr>
@@ -511,15 +510,14 @@ export function TransactionsView({
                                         <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Payee</th>
                                         <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Category</th>
                                         <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Memo</th>
-                                        <th className="text-right py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Amount</th>
-                                        <th className="text-center py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground w-20">Type</th>
+                                        <th className="text-right py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground w-28">Outflow</th>
+                                        <th className="text-right py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground w-28">Inflow</th>
                                         <th className="w-16"></th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {filteredTransactions.map((transaction) => {
                                         const isExpanded = expandedSplits.has(transaction.id)
-                                        const amountClass = transaction.amount >= 0 ? 'text-primary' : 'text-destructive'
 
                                         return (
                                             <Fragment key={transaction.id}>
@@ -528,6 +526,7 @@ export function TransactionsView({
                                                     style={{ borderColor: 'hsl(var(--border) / 0.5)' }}
                                                 >
                                                     {/* Cleared indicator */}
+
                                                     <td className="py-3 px-3 text-center">
                                                         <ClearedDot
                                                             cleared={transaction.cleared}
@@ -578,16 +577,14 @@ export function TransactionsView({
                                                         {transaction.memo || <span className="text-muted-foreground/30">—</span>}
                                                     </td>
 
-                                                    {/* Amount */}
-                                                    <td className={`py-3 px-3 text-sm font-semibold text-right financial-figure ${amountClass}`}>
-                                                        {formatAmount(transaction.amount)}
+                                                    {/* Outflow */}
+                                                    <td className="py-3 px-3 text-sm font-semibold text-right financial-figure text-destructive/90 tabular-nums">
+                                                        {transaction.amount < 0 ? formatAmount(transaction.amount) : ''}
                                                     </td>
 
-                                                    {/* Type */}
-                                                    <td className="py-3 px-3 text-center">
-                                                        <div className="flex items-center justify-center gap-1">
-                                                            {getTypeIcon(transaction.type)}
-                                                        </div>
+                                                    {/* Inflow */}
+                                                    <td className="py-3 px-3 text-sm font-semibold text-right financial-figure text-primary/90 tabular-nums">
+                                                        {transaction.amount >= 0 ? formatAmount(transaction.amount) : ''}
                                                     </td>
 
                                                     {/* Actions */}

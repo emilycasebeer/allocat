@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { supabase } from '../providers'
+import { useState, useRef } from 'react'
+import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -96,6 +96,10 @@ interface SetupWizardProps {
 }
 
 export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
+    const { accessToken } = useAuth()
+    const accessTokenRef = useRef<string | null>(null)
+    accessTokenRef.current = accessToken
+
     const [step, setStep] = useState(0)
     const [addedAccounts, setAddedAccounts] = useState<AddedAccount[]>([])
     const [createdCategoryCount, setCreatedCategoryCount] = useState(0)
@@ -122,10 +126,7 @@ export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
 
     // ── Helpers ────────────────────────────────────────────────────────────────
 
-    const getToken = async () => {
-        const { data: { session } } = await supabase.auth.getSession()
-        return session?.access_token ?? null
-    }
+    const getToken = () => accessTokenRef.current
 
     // ── Step 1 actions ─────────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { supabase } from '../providers'
+import { useState, useEffect, useRef } from 'react'
+import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -33,6 +33,10 @@ interface ManagePayeesModalProps {
 }
 
 export function ManagePayeesModal({ open, onOpenChange, categories }: ManagePayeesModalProps) {
+    const { accessToken } = useAuth()
+    const accessTokenRef = useRef<string | null>(null)
+    accessTokenRef.current = accessToken
+
     const [payees, setPayees] = useState<Payee[]>([])
     const [loading, setLoading] = useState(true)
     const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -47,10 +51,10 @@ export function ManagePayeesModal({ open, onOpenChange, categories }: ManagePaye
     const fetchPayees = async () => {
         setLoading(true)
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
             const res = await fetch('/api/payees', {
-                headers: { 'Authorization': `Bearer ${session.access_token}` }
+                headers: { 'Authorization': `Bearer ${token}` }
             })
             if (res.ok) {
                 const { payees } = await res.json()
@@ -67,11 +71,11 @@ export function ManagePayeesModal({ open, onOpenChange, categories }: ManagePaye
         const trimmed = renamingValue.trim()
         if (!trimmed) { setRenamingId(null); return }
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
             const res = await fetch(`/api/payees/${payeeId}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ name: trimmed })
             })
             if (res.ok) {
@@ -90,12 +94,12 @@ export function ManagePayeesModal({ open, onOpenChange, categories }: ManagePaye
 
     const handleDefaultCategoryChange = async (payeeId: string, categoryId: string) => {
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
             const newCategoryId = categoryId === '__none__' ? null : categoryId
             const res = await fetch(`/api/payees/${payeeId}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ default_category_id: newCategoryId })
             })
             if (res.ok) {
@@ -112,11 +116,11 @@ export function ManagePayeesModal({ open, onOpenChange, categories }: ManagePaye
     const handleDelete = async (payee: Payee) => {
         if (!confirm(`Delete payee "${payee.name}"? This will not delete transactions.`)) return
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
             const res = await fetch(`/api/payees/${payee.id}`, {
                 method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${session.access_token}` }
+                headers: { 'Authorization': `Bearer ${token}` }
             })
             if (res.ok) {
                 setPayees(prev => prev.filter(p => p.id !== payee.id))

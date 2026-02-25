@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { supabase } from '../providers'
+import { useState, useRef } from 'react'
+import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -21,6 +21,10 @@ interface AddCategoryModalProps {
 }
 
 export function AddCategoryModal({ open, onOpenChange, onCategoryAdded }: AddCategoryModalProps) {
+    const { accessToken } = useAuth()
+    const accessTokenRef = useRef<string | null>(null)
+    accessTokenRef.current = accessToken
+
     const [name, setName] = useState('')
     const [groupName, setGroupName] = useState('')
     const [loading, setLoading] = useState(false)
@@ -31,14 +35,14 @@ export function AddCategoryModal({ open, onOpenChange, onCategoryAdded }: AddCat
 
         setLoading(true)
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             const response = await fetch('/api/categories', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`
+                    'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify({ name, group_name: groupName })
             })

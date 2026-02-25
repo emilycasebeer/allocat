@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { supabase } from '../providers'
+import { useState, useEffect, useRef } from 'react'
+import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -64,6 +64,10 @@ export function AddScheduledTransactionModal({
     editing,
     onSaved,
 }: AddScheduledTransactionModalProps) {
+    const { accessToken } = useAuth()
+    const accessTokenRef = useRef<string | null>(null)
+    accessTokenRef.current = accessToken
+
     const [accountId, setAccountId] = useState('')
     const [payeeName, setPayeeName] = useState('')
     const [categoryId, setCategoryId] = useState('')
@@ -98,13 +102,13 @@ export function AddScheduledTransactionModal({
             setEndDate('')
         }
 
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (!session) return
-            fetch('/api/payees', { headers: { 'Authorization': `Bearer ${session.access_token}` } })
+        const token = accessTokenRef.current
+        if (token) {
+            fetch('/api/payees', { headers: { 'Authorization': `Bearer ${token}` } })
                 .then(r => r.ok ? r.json() : null)
                 .then(data => { if (data?.payees) setPayeeNames(data.payees.map((p: any) => p.name)) })
                 .catch(() => {})
-        })
+        }
     }, [open, editing])
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -113,8 +117,8 @@ export function AddScheduledTransactionModal({
 
         setLoading(true)
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             const parsedAmount = parseFloat(amount)
             const body = {
@@ -137,7 +141,7 @@ export function AddScheduledTransactionModal({
                 method,
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`,
+                    'Authorization': `Bearer ${token}`,
                 },
                 body: JSON.stringify(body),
             })

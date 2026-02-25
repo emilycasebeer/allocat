@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { supabase } from '../providers'
+import { useState, useEffect, useRef } from 'react'
+import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -47,6 +47,10 @@ export function SetGoalModal({
     existingGoal,
     onSaved,
 }: SetGoalModalProps) {
+    const { accessToken } = useAuth()
+    const accessTokenRef = useRef<string | null>(null)
+    accessTokenRef.current = accessToken
+
     const [goalType, setGoalType] = useState<string>('monthly_savings')
     const [targetAmount, setTargetAmount] = useState('')
     const [targetDate, setTargetDate] = useState('')
@@ -73,8 +77,8 @@ export function SetGoalModal({
         e.preventDefault()
         setLoading(true)
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             const body: Record<string, unknown> = { category_id: categoryId, goal_type: goalType }
 
@@ -92,7 +96,7 @@ export function SetGoalModal({
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`,
+                    'Authorization': `Bearer ${token}`,
                 },
                 body: JSON.stringify(body),
             })
@@ -116,12 +120,12 @@ export function SetGoalModal({
         if (!confirm('Remove this goal?')) return
         setDeleting(true)
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             const response = await fetch(`/api/category-goals/${existingGoal.id}`, {
                 method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${session.access_token}` },
+                headers: { 'Authorization': `Bearer ${token}` },
             })
 
             if (response.ok) {

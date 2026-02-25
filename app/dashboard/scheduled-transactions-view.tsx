@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { supabase } from '../providers'
+import { useState, useEffect, useRef } from 'react'
+import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Plus } from 'lucide-react'
@@ -47,6 +47,10 @@ export function ScheduledTransactionsView({
     categories,
     onTransactionAdded,
 }: ScheduledTransactionsViewProps) {
+    const { accessToken } = useAuth()
+    const accessTokenRef = useRef<string | null>(null)
+    accessTokenRef.current = accessToken
+
     const [due, setDue] = useState<ScheduledTransaction[]>([])
     const [upcoming, setUpcoming] = useState<ScheduledTransaction[]>([])
     const [loading, setLoading] = useState(true)
@@ -61,11 +65,11 @@ export function ScheduledTransactionsView({
     const fetchScheduled = async () => {
         setLoading(true)
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             const response = await fetch('/api/scheduled-transactions', {
-                headers: { 'Authorization': `Bearer ${session.access_token}` },
+                headers: { 'Authorization': `Bearer ${token}` },
             })
 
             if (response.ok) {
@@ -83,12 +87,12 @@ export function ScheduledTransactionsView({
     const handleEnter = async (item: ScheduledTransaction) => {
         setEnteringId(item.id)
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             const response = await fetch(`/api/scheduled-transactions/${item.id}/enter`, {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${session.access_token}` },
+                headers: { 'Authorization': `Bearer ${token}` },
             })
 
             if (response.ok) {
@@ -108,12 +112,12 @@ export function ScheduledTransactionsView({
     const handleDelete = async (id: string) => {
         if (!confirm('Delete this scheduled transaction?')) return
         try {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return
+            const token = accessTokenRef.current
+            if (!token) return
 
             const response = await fetch(`/api/scheduled-transactions/${id}`, {
                 method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${session.access_token}` },
+                headers: { 'Authorization': `Bearer ${token}` },
             })
 
             if (response.ok) fetchScheduled()
