@@ -16,7 +16,9 @@ import {
 import {
     Select,
     SelectContent,
+    SelectGroup,
     SelectItem,
+    SelectLabel,
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select'
@@ -162,6 +164,14 @@ export function AddScheduledTransactionModal({
 
     const selectableCategories = categories.filter((c) => !c.is_system)
 
+    const groupedCategories = Object.entries(
+        selectableCategories.reduce((acc, cat) => {
+            if (!acc[cat.group_name]) acc[cat.group_name] = []
+            acc[cat.group_name].push(cat)
+            return acc
+        }, {} as Record<string, typeof selectableCategories>)
+    )
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-[520px]">
@@ -224,10 +234,17 @@ export function AddScheduledTransactionModal({
                                 <SelectValue placeholder="Select category (optional)" />
                             </SelectTrigger>
                             <SelectContent>
-                                {selectableCategories.map((c) => (
-                                    <SelectItem key={c.id} value={c.id}>
-                                        {c.group_name} — {c.name}
-                                    </SelectItem>
+                                {groupedCategories.map(([groupName, cats]) => (
+                                    <SelectGroup key={groupName}>
+                                        <SelectLabel className="px-2 py-1 text-xs font-semibold text-foreground/60">
+                                            {groupName}
+                                        </SelectLabel>
+                                        {cats.map(cat => (
+                                            <SelectItem key={cat.id} value={cat.id} className="pl-5">
+                                                {cat.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectGroup>
                                 ))}
                             </SelectContent>
                         </Select>

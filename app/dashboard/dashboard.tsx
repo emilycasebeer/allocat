@@ -216,7 +216,10 @@ export function Dashboard() {
                         setBudgetRefreshKey(k => k + 1)
                     }}
                     currentView={currentView}
-                    onViewChange={(view) => setCurrentView(view as ViewType)}
+                    onViewChange={(view) => {
+                        setSelectedAccount(null)
+                        setCurrentView(view as ViewType)
+                    }}
                     onManagePayees={() => setShowManagePayees(true)}
                 />
 

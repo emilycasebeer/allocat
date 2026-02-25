@@ -54,7 +54,7 @@
   }
 
   .budget-table td {
-    @apply px-3 py-2.5;
+    @apply px-3 py-1.5;
     border-bottom: 1px solid hsl(var(--border) / 0.4);
   }
 
@@ -101,11 +101,12 @@
 
   /* ── Available column badges ───────────────────────────── */
   .available-positive {
-    @apply inline-flex items-center justify-end rounded-full px-2.5 py-0.5 text-xs font-semibold min-w-[5rem];
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
     font-family: var(--font-dm-sans), system-ui, sans-serif;
     font-variant-numeric: tabular-nums;
     background-color: hsl(160 72% 40% / 0.22);
     color: hsl(160 72% 62%);
+    margin-right: -0.625rem; /* pulls pill right so text aligns with plain numbers */
   }
 
   .available-zero {
@@ -116,11 +117,12 @@
   }
 
   .available-negative {
-    @apply inline-flex items-center justify-end rounded-full px-2.5 py-0.5 text-xs font-semibold min-w-[5rem];
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
     font-family: var(--font-dm-sans), system-ui, sans-serif;
     font-variant-numeric: tabular-nums;
     background-color: hsl(350 80% 60% / 0.22);
     color: hsl(350 80% 72%);
+    margin-right: -0.625rem; /* pulls pill right so text aligns with plain numbers */
   }
 
   /* ── Utility classes ───────────────────────────────────── */

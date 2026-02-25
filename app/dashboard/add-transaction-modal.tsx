@@ -16,7 +16,9 @@ import {
 import {
     Select,
     SelectContent,
+    SelectGroup,
     SelectItem,
+    SelectLabel,
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select'
@@ -160,6 +162,15 @@ export function AddTransactionModal({
 
     // Only show non-system categories in the picker
     const selectableCategories = categories.filter((c) => !c.is_system)
+
+    // Group in insertion order (which preserves API sort_order)
+    const groupedCategories = Object.entries(
+        selectableCategories.reduce((acc, cat) => {
+            if (!acc[cat.group_name]) acc[cat.group_name] = []
+            acc[cat.group_name].push(cat)
+            return acc
+        }, {} as Record<string, typeof selectableCategories>)
+    )
 
     const splitTotal = splitRows.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0)
     const totalAmount = parseFloat(amount) || 0
@@ -427,10 +438,17 @@ export function AddTransactionModal({
                                         <SelectValue placeholder="Select a category" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {selectableCategories.map((category) => (
-                                            <SelectItem key={category.id} value={category.id}>
-                                                {category.group_name} — {category.name}
-                                            </SelectItem>
+                                        {groupedCategories.map(([groupName, cats]) => (
+                                            <SelectGroup key={groupName}>
+                                                <SelectLabel className="px-2 py-1 text-xs font-semibold text-foreground/60">
+                                                    {groupName}
+                                                </SelectLabel>
+                                                {cats.map(cat => (
+                                                    <SelectItem key={cat.id} value={cat.id} className="pl-5">
+                                                        {cat.name}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectGroup>
                                         ))}
                                     </SelectContent>
                                 </Select>
@@ -449,10 +467,17 @@ export function AddTransactionModal({
                                                     <SelectValue placeholder="Category" />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    {selectableCategories.map((c) => (
-                                                        <SelectItem key={c.id} value={c.id}>
-                                                            {c.group_name} — {c.name}
-                                                        </SelectItem>
+                                                    {groupedCategories.map(([groupName, cats]) => (
+                                                        <SelectGroup key={groupName}>
+                                                            <SelectLabel className="px-2 py-1 text-xs font-semibold text-foreground/60">
+                                                                {groupName}
+                                                            </SelectLabel>
+                                                            {cats.map(cat => (
+                                                                <SelectItem key={cat.id} value={cat.id} className="pl-5">
+                                                                    {cat.name}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectGroup>
                                                     ))}
                                                 </SelectContent>
                                             </Select>

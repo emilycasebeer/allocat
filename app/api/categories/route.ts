@@ -112,6 +112,28 @@ export async function POST(request: NextRequest) {
             return createErrorResponse(categoryError?.message ?? 'Failed to create category', 500)
         }
 
+        // Backfill a $0 allocation for every existing budget month so getBudgetSummary
+        // (which inner-joins category_allocations) can see the new category immediately.
+        const { data: existingBudgets } = await supabase
+            .from('budgets')
+            .select('id')
+            .eq('user_id', user.id)
+
+        if (existingBudgets && existingBudgets.length > 0) {
+            await supabase
+                .from('category_allocations')
+                .insert(
+                    existingBudgets.map(b => ({
+                        budget_id: b.id,
+                        category_id: category.id,
+                        budgeted_amount: 0,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                    }))
+                )
+            // Ignore error — category was created; allocations are best-effort backfill
+        }
+
         return NextResponse.json({
             category: {
                 id: category.id,

@@ -97,6 +97,7 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey, onTbbChan
     const [showAddGroupPopover, setShowAddGroupPopover] = useState(false)
     const [newGroupName, setNewGroupName] = useState('')
     const [addingGroupLoading, setAddingGroupLoading] = useState(false)
+    const [emptyGroups, setEmptyGroups] = useState<Set<string>>(new Set())
     const [addingCategoryToGroup, setAddingCategoryToGroup] = useState<string | null>(null)
     const [newCategoryName, setNewCategoryName] = useState('')
     const [addingCategoryLoading, setAddingCategoryLoading] = useState(false)
@@ -333,9 +334,9 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey, onTbbChan
             })
             if (res.ok) {
                 setShowAddGroupPopover(false)
+                setEmptyGroups(prev => new Set([...prev, trimmed]))
                 setNewGroupName('')
                 onCategoryAdded()
-                fetchBudgetSummary()
             } else {
                 const err = await res.json()
                 alert(`Error: ${err.error}`)
@@ -360,10 +361,29 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey, onTbbChan
                 body: JSON.stringify({ name: trimmed, group_name: groupName }),
             })
             if (res.ok) {
+                const { category } = await res.json()
                 setAddingCategoryToGroup(null)
                 setNewCategoryName('')
                 onCategoryAdded()
-                fetchBudgetSummary()
+                // Optimistic insert — new category appears instantly with $0 values
+                setBudgetSummary(prev => {
+                    if (!prev) return prev
+                    const newCat: BudgetCategory = {
+                        id: category.id,
+                        name: category.name,
+                        group_name: groupName,
+                        is_system: false,
+                        budgeted_amount: 0,
+                        activity_amount: 0,
+                        available_amount: 0,
+                        goal: null,
+                    }
+                    const updated = { ...prev, categories: [...prev.categories, newCat] }
+                    cache.current.set(cacheKey(month, year), updated)
+                    return updated
+                })
+                // Silent background sync — no setLoading(true), no skeleton flash
+                fetchMonth(month, year, true)
             } else {
                 const err = await res.json()
                 alert(`Error: ${err.error}`)
@@ -457,6 +477,17 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey, onTbbChan
         return groups
     }, {} as Record<string, BudgetCategory[]>)
 
+    // Merge in locally-tracked empty groups (newly created groups with no categories yet).
+    // Once a background sync returns categories for a group it migrates into `grouped`
+    // naturally, so we drop it from emptyGroups at that point.
+    const groupsWithCategories = new Set(Object.keys(grouped))
+    const allGroupEntries: [string, BudgetCategory[]][] = [
+        ...Object.entries(grouped),
+        ...[...emptyGroups]
+            .filter(g => !groupsWithCategories.has(g))
+            .map(g => [g, []] as [string, BudgetCategory[]]),
+    ]
+
     return (
         <div className="space-y-4">
             {/* ── Budget Table ─────────────────────────────────────────── */}
@@ -511,7 +542,7 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey, onTbbChan
                             </tr>
                         </thead>
                         <tbody>
-                            {Object.entries(grouped).map(([groupName, groupCategories]) => {
+                            {allGroupEntries.map(([groupName, groupCategories]) => {
                                 const isCollapsed = collapsedGroups.has(groupName)
                                 const groupBudgeted = groupCategories.reduce((s, c) => s + c.budgeted_amount, 0)
                                 const groupActivity = groupCategories.reduce((s, c) => s + c.activity_amount, 0)

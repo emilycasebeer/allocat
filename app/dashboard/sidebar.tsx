@@ -44,18 +44,11 @@ function fmt(amount: number) {
 function AccountBalance({ account }: { account: Account }) {
     const value = account.is_liability ? -Math.abs(account.balance) : account.balance
     const isNeg = value < 0
-    if (isNeg) {
-        return (
-            <span
-                className="text-[11px] financial-figure font-medium px-2 py-0.5 rounded-full flex-shrink-0"
-                style={{ background: 'hsl(350 80% 60% / 0.12)', color: 'hsl(350 80% 65%)' }}
-            >
-                {fmt(value)}
-            </span>
-        )
-    }
     return (
-        <span className="text-[11px] financial-figure text-muted-foreground/70 flex-shrink-0">
+        <span
+            className="text-xs financial-figure font-medium flex-shrink-0"
+            style={{ color: isNeg ? 'hsl(350 80% 65%)' : undefined }}
+        >
             {fmt(value)}
         </span>
     )
@@ -82,19 +75,19 @@ function AccountGroup({
     return (
         <div>
             <button
-                className="w-full flex items-center justify-between px-2 py-1 rounded-md hover:bg-muted/30 transition-colors"
+                className="w-full flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-muted/30 transition-colors"
                 onClick={() => setCollapsed(c => !c)}
             >
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1.5">
                     {collapsed
-                        ? <ChevronRight className="h-3 w-3 text-muted-foreground/40 flex-shrink-0" />
-                        : <ChevronDown className="h-3 w-3 text-muted-foreground/40 flex-shrink-0" />
+                        ? <ChevronRight className="h-3 w-3 text-primary/50 flex-shrink-0" />
+                        : <ChevronDown className="h-3 w-3 text-primary/50 flex-shrink-0" />
                     }
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/50">
                         {label}
                     </span>
                 </div>
-                <span className={`text-[11px] financial-figure font-medium ${total < 0 ? 'text-destructive/70' : 'text-muted-foreground/60'}`}>
+                <span className={`text-xs financial-figure font-medium ${total < 0 ? 'text-destructive/70' : 'text-muted-foreground/70'}`}>
                     {fmt(total)}
                 </span>
             </button>
@@ -106,19 +99,14 @@ function AccountGroup({
                         return (
                             <button
                                 key={account.id}
-                                className={`w-full flex items-center justify-between gap-2 pl-5 pr-2 py-1.5 rounded-md transition-colors ${
+                                className={`w-full flex items-center justify-between gap-2 pl-6 pr-2 py-1.5 rounded-md transition-colors ${
                                     isActive
-                                        ? 'bg-primary/12 text-foreground'
-                                        : 'text-foreground/75 hover:bg-muted/40 hover:text-foreground'
+                                        ? 'bg-primary/15 text-primary'
+                                        : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
                                 }`}
                                 onClick={() => onAccountSelect(account)}
                             >
-                                <div className="flex items-center gap-2 min-w-0">
-                                    <div className={`h-1.5 w-1.5 rounded-full flex-shrink-0 transition-colors ${
-                                        isActive ? 'bg-primary' : 'bg-transparent'
-                                    }`} />
-                                    <span className="text-sm truncate text-left">{account.name}</span>
-                                </div>
+                                <span className="text-sm truncate text-left">{account.name}</span>
                                 <AccountBalance account={account} />
                             </button>
                         )
@@ -140,7 +128,7 @@ export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountA
         { id: 'scheduled', label: 'Scheduled',  Icon: CalendarClock },
     ] as const
 
-    const isAllAccounts = currentView === 'transactions'
+    const isAllAccounts = currentView === 'transactions' && selectedAccount === null
 
     return (
         <div
