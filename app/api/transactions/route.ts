@@ -40,7 +40,9 @@ export async function GET(request: NextRequest) {
         if (startDate) query = query.gte('date', startDate)
         if (endDate) query = query.lte('date', endDate)
 
-        const { data: transactions, error } = await query.order('date', { ascending: false })
+        const { data: transactions, error } = await query
+            .order('date', { ascending: false })
+            .order('created_at', { ascending: false })
 
         if (error) {
             return createErrorResponse(error.message, 500)

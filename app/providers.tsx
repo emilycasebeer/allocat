@@ -46,6 +46,20 @@ const AuthContext = createContext<AuthContextType>({
 
 export const useAuth = () => useContext(AuthContext)
 
+type Theme = 'dark' | 'light'
+
+interface ThemeContextType {
+    theme: Theme
+    setTheme: (theme: Theme) => void
+}
+
+const ThemeContext = createContext<ThemeContextType>({
+    theme: 'dark',
+    setTheme: () => { },
+})
+
+export const useTheme = () => useContext(ThemeContext)
+
 export function Providers({ children }: { children: React.ReactNode }) {
     // Start with null/true to match SSR output and avoid hydration mismatch.
     const [user, setUser] = useState<any>(null)
@@ -55,11 +69,25 @@ export function Providers({ children }: { children: React.ReactNode }) {
     // to avoid concurrent getSession() calls that can deadlock during token refresh.
     const [accessToken, setAccessToken] = useState<string | null>(null)
 
+    const [theme, setThemeState] = useState<Theme>('dark')
+
+    const setTheme = (newTheme: Theme) => {
+        setThemeState(newTheme)
+        localStorage.setItem('allocat-theme', newTheme)
+        document.documentElement.classList.toggle('dark', newTheme === 'dark')
+        document.documentElement.classList.toggle('light', newTheme === 'light')
+    }
+
     // Runs synchronously before the first browser paint — reads localStorage and
     // resolves auth state instantly for returning users, eliminating the spinner.
     useLayoutEffect(() => {
         setUser(getStoredUser())
         setLoading(false)
+        const saved = localStorage.getItem('allocat-theme') as Theme | null
+        const resolved = saved ?? 'dark'
+        setThemeState(resolved)
+        document.documentElement.classList.toggle('dark', resolved === 'dark')
+        document.documentElement.classList.toggle('light', resolved === 'light')
     }, [])
 
     useEffect(() => {
@@ -85,8 +113,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
     }
 
     return (
-        <AuthContext.Provider value={{ user, loading, accessToken, signOut }}>
-            {children}
-        </AuthContext.Provider>
+        <ThemeContext.Provider value={{ theme, setTheme }}>
+            <AuthContext.Provider value={{ user, loading, accessToken, signOut }}>
+                {children}
+            </AuthContext.Provider>
+        </ThemeContext.Provider>
     )
 }

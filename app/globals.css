@@ -25,6 +25,34 @@
     --input: 222 16% 14%;
     --ring: 160 72% 40%;
     --radius: 0.375rem;
+    --category-group-bg: 222 16% 20%;
+    --available-positive-text: 160 72% 62%;
+    --available-negative-text: 350 80% 72%;
+  }
+
+  .light {
+    --background: 210 20% 97%;
+    --foreground: 222 22% 14%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 22% 14%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 22% 14%;
+    --primary: 160 68% 32%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 16% 92%;
+    --secondary-foreground: 222 22% 14%;
+    --muted: 210 16% 92%;
+    --muted-foreground: 215 14% 44%;
+    --accent: 38 90% 46%;
+    --accent-foreground: 222 22% 8%;
+    --destructive: 350 72% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 16% 84%;
+    --input: 210 20% 94%;
+    --ring: 160 68% 32%;
+    --category-group-bg: 210 16% 91%;
+    --available-positive-text: 160 65% 28%;
+    --available-negative-text: 350 72% 40%;
   }
 }
 
@@ -63,7 +91,7 @@
   }
 
   .category-group td {
-    background-color: hsl(222 16% 20%);
+    background-color: hsl(var(--category-group-bg));
     color: hsl(var(--foreground));
     border-top: 1px solid hsl(var(--border));
     border-bottom: 1px solid hsl(var(--border));
@@ -105,7 +133,7 @@
     font-family: var(--font-dm-sans), system-ui, sans-serif;
     font-variant-numeric: tabular-nums;
     background-color: hsl(160 72% 40% / 0.22);
-    color: hsl(160 72% 62%);
+    color: hsl(var(--available-positive-text));
     margin-right: -0.625rem; /* pulls pill right so text aligns with plain numbers */
   }
 
@@ -121,7 +149,7 @@
     font-family: var(--font-dm-sans), system-ui, sans-serif;
     font-variant-numeric: tabular-nums;
     background-color: hsl(350 80% 60% / 0.22);
-    color: hsl(350 80% 72%);
+    color: hsl(var(--available-negative-text));
     margin-right: -0.625rem; /* pulls pill right so text aligns with plain numbers */
   }
 

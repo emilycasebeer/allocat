@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Plus, LayoutList, BarChart3, Landmark, ChevronDown, ChevronRight, CalendarClock, Users, LogOut, User } from 'lucide-react'
 import { AddAccountModal } from '@/app/dashboard/add-account-modal'
+import { SettingsModal } from '@/app/dashboard/settings-modal'
 import type { Account } from '@/app/dashboard/dashboard'
 import Decimal from 'decimal.js'
 import { useAuth, supabase } from '../providers'
@@ -129,6 +130,7 @@ function AccountGroup({
 
 export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountAdded, currentView, onViewChange, onManagePayees }: SidebarProps) {
     const [showAddAccount, setShowAddAccount] = useState(false)
+    const [showSettings, setShowSettings] = useState(false)
     const { user, signOut } = useAuth()
     const [displayName, setDisplayName] = useState<string | null>(null)
 
@@ -256,7 +258,10 @@ export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountA
                             </div>
                         </DropdownMenuLabel>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem className="focus:bg-primary focus:text-primary-foreground">
+                        <DropdownMenuItem
+                            className="focus:bg-primary focus:text-primary-foreground"
+                            onClick={() => setShowSettings(true)}
+                        >
                             <User className="mr-2 h-4 w-4" />
                             <span>Settings</span>
                         </DropdownMenuItem>
@@ -279,6 +284,12 @@ export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountA
                     setShowAddAccount(false)
                     onAccountAdded()
                 }}
+            />
+
+            <SettingsModal
+                open={showSettings}
+                onOpenChange={setShowSettings}
+                onNameChange={(name) => setDisplayName(name || null)}
             />
         </div>
     )

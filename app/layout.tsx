@@ -35,9 +35,13 @@ export default function RootLayout({
     return (
         <html
             lang="en"
-            className={`dark ${syne.variable} ${dmSans.variable} ${dmMono.variable}`}
+            className={`${syne.variable} ${dmSans.variable} ${dmMono.variable}`}
             suppressHydrationWarning
         >
+            <head>
+                {/* Runs synchronously before CSS to prevent flash of wrong theme */}
+                <script dangerouslySetInnerHTML={{ __html: `(function(){var t=localStorage.getItem('allocat-theme');var isDark=t!=='light';document.documentElement.classList.toggle('dark',isDark);document.documentElement.classList.toggle('light',!isDark);})()` }} />
+            </head>
             <body>
                 <Providers>
                     {children}

@@ -249,26 +249,22 @@ export function Dashboard() {
                             <div className="flex justify-center">
                                 {tbb !== null ? (
                                     <div
-                                        className="rounded-xl border px-5 py-3 flex flex-col items-center"
+                                        className="rounded-xl border px-5 py-3 flex flex-col items-center bg-card"
                                         style={{
-                                            borderColor: tbb >= 0 ? 'hsl(160 72% 40% / 0.35)' : 'hsl(350 80% 60% / 0.3)',
-                                            background: tbb >= 0
-                                                ? 'linear-gradient(135deg, hsl(222 20% 11%), hsl(160 72% 40% / 0.07))'
-                                                : 'linear-gradient(135deg, hsl(222 20% 11%), hsl(350 80% 60% / 0.06))',
+                                            borderColor: tbb >= 0 ? 'hsl(var(--primary) / 0.35)' : 'hsl(var(--destructive) / 0.3)',
                                         }}
                                     >
                                         <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
                                             Ready to Assign
                                         </p>
                                         <div
-                                            className="font-display text-2xl font-bold financial-figure leading-none"
-                                            style={{ color: tbb >= 0 ? 'hsl(160 72% 55%)' : 'hsl(350 80% 65%)' }}
+                                            className={`font-display text-2xl font-bold financial-figure leading-none ${tbb >= 0 ? 'text-primary' : 'text-destructive'}`}
                                         >
                                             {tbb < 0 ? `-$${Math.abs(tbb).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `$${tbb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="rounded-xl border px-5 py-3 animate-pulse" style={{ borderColor: 'hsl(160 72% 40% / 0.2)', background: 'hsl(222 20% 11%)' }}>
+                                    <div className="rounded-xl border px-5 py-3 animate-pulse bg-card" style={{ borderColor: 'hsl(var(--primary) / 0.2)' }}>
                                         <div className="h-2 w-20 bg-muted rounded mb-2" />
                                         <div className="h-6 w-24 bg-muted rounded" />
                                     </div>
