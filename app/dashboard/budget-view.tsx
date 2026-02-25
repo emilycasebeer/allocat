@@ -4,8 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, Target, Pencil, Trash2, ArrowLeftRight, Copy, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus, Target, Pencil, Trash2, ArrowLeftRight, ChevronDown, ChevronRight } from 'lucide-react'
 import { AddCategoryModal } from '@/app/dashboard/add-category-modal'
 import { SetGoalModal } from '@/app/dashboard/set-goal-modal'
 import { MoveMoneyModal } from '@/app/dashboard/move-money-modal'
@@ -100,7 +99,6 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
     const [renamingCategory, setRenamingCategory] = useState<{ id: string; name: string } | null>(null)
     const [showMoveMoney, setShowMoveMoney] = useState(false)
     const [openPopoverCategoryId, setOpenPopoverCategoryId] = useState<string | null>(null)
-    const [copyingLastMonth, setCopyingLastMonth] = useState(false)
     const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
 
     // Cache: key = "YYYY-M", value = BudgetSummary
@@ -245,32 +243,6 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
         }
     }
 
-    const handleCopyLastMonth = async () => {
-        if (!budgetSummary) return
-        setCopyingLastMonth(true)
-        try {
-            const token = accessTokenRef.current
-            if (!token) return
-            const response = await fetch('/api/budgets/copy', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ to_budget_id: budgetSummary.id }),
-            })
-            if (response.ok) {
-                const { budget } = await response.json()
-                cache.current.set(cacheKey(month, year), budget)
-                setBudgetSummary(budget)
-            } else {
-                const err = await response.json()
-                alert(`Error: ${err.error}`)
-            }
-        } catch (error) {
-            console.error('Error copying last month:', error)
-        } finally {
-            setCopyingLastMonth(false)
-        }
-    }
-
     const handleKeyDown = (e: React.KeyboardEvent, categoryId: string) => {
         if (e.key === 'Enter') handleBudgetSave(categoryId)
         else if (e.key === 'Escape') { setEditingCell(null); setEditingValue('') }
@@ -345,74 +317,61 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
 
     if (loading) {
         return (
-            <div className="space-y-5">
-                {/* Stat cards skeleton */}
-                <div className="grid grid-cols-4 gap-3">
-                    {[...Array(4)].map((_, i) => (
-                        <div key={i} className="rounded-xl border p-5 bg-card/40 animate-pulse">
-                            <div className="h-2 w-24 bg-muted rounded mb-4" />
-                            <div className="h-8 w-28 bg-muted rounded" />
-                        </div>
-                    ))}
+            <div className="space-y-4">
+                {/* RTA card skeleton */}
+                <div className="rounded-xl border px-5 py-4 inline-flex flex-col animate-pulse" style={{ borderColor: 'hsl(38 90% 50% / 0.2)', background: 'hsl(222 20% 11%)' }}>
+                    <div className="h-2 w-24 bg-muted rounded mb-3" />
+                    <div className="h-8 w-32 bg-muted rounded" />
                 </div>
                 {/* Category table skeleton */}
-                <Card>
-                    <CardHeader className="pb-0">
-                        <div className="flex items-center justify-between animate-pulse">
-                            <div className="h-4 w-20 bg-muted rounded" />
-                            <div className="flex gap-2">
-                                <div className="h-8 w-24 bg-muted rounded" />
-                                <div className="h-8 w-32 bg-muted rounded" />
-                                <div className="h-8 w-28 bg-muted rounded" />
-                            </div>
-                        </div>
-                    </CardHeader>
-                    <CardContent className="p-0 mt-4">
-                        <div className="overflow-x-auto">
-                            <table className="budget-table">
-                                <thead>
-                                    <tr>
-                                        <th className="w-2/5 pl-4">Category</th>
-                                        <th className="w-1/5 text-right">Assigned</th>
-                                        <th className="w-1/5 text-right">Outflow</th>
-                                        <th className="w-1/5 text-right pr-4">Available</th>
-                                        <th className="w-20"></th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {/* Group header placeholder */}
-                                    {[0, 1].map((g) => (
-                                        <React.Fragment key={g}>
-                                            <tr className="animate-pulse">
-                                                <td className="py-2.5 pl-4">
-                                                    <div className="h-2.5 w-32 bg-muted/70 rounded" />
+                <div>
+                    <div className="flex gap-2 mb-1 px-1 animate-pulse">
+                        <div className="h-7 w-28 bg-muted rounded" />
+                        <div className="h-7 w-24 bg-muted rounded" />
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="budget-table">
+                            <thead>
+                                <tr>
+                                    <th className="pl-4 text-left">Category</th>
+                                    <th className="w-36 text-right">Assigned</th>
+                                    <th className="w-36 text-right">Outflow</th>
+                                    <th className="w-36 text-right">Available</th>
+                                    <th className="w-16"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {[0, 1].map((g) => (
+                                    <React.Fragment key={g}>
+                                        <tr className="animate-pulse">
+                                            <td className="py-2.5 pl-4">
+                                                <div className="h-2.5 w-32 bg-muted/70 rounded" />
+                                            </td>
+                                            <td /><td /><td /><td />
+                                        </tr>
+                                        {[...Array(4)].map((_, i) => (
+                                            <tr key={i} className="animate-pulse">
+                                                <td className="py-3 pl-8">
+                                                    <div className="h-3 bg-muted rounded" style={{ width: `${55 + (i * 13) % 30}%` }} />
                                                 </td>
-                                                <td /><td /><td /><td />
+                                                <td className="py-3 text-right pr-3">
+                                                    <div className="h-3 w-14 bg-muted rounded ml-auto" />
+                                                </td>
+                                                <td className="py-3 text-right pr-3">
+                                                    <div className="h-3 w-14 bg-muted rounded ml-auto" />
+                                                </td>
+                                                <td className="py-3 text-right pr-3">
+                                                    <div className="h-3 w-14 bg-muted rounded ml-auto" />
+                                                </td>
+                                                <td />
                                             </tr>
-                                            {[...Array(4)].map((_, i) => (
-                                                <tr key={i} className="animate-pulse">
-                                                    <td className="py-3 pl-8">
-                                                        <div className="h-3 bg-muted rounded" style={{ width: `${55 + (i * 13) % 30}%` }} />
-                                                    </td>
-                                                    <td className="py-3 text-right pr-3">
-                                                        <div className="h-3 w-14 bg-muted rounded ml-auto" />
-                                                    </td>
-                                                    <td className="py-3 text-right pr-3">
-                                                        <div className="h-3 w-14 bg-muted rounded ml-auto" />
-                                                    </td>
-                                                    <td className="py-3 text-right pr-4">
-                                                        <div className="h-3 w-14 bg-muted rounded ml-auto" />
-                                                    </td>
-                                                    <td />
-                                                </tr>
-                                            ))}
-                                        </React.Fragment>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </CardContent>
-                </Card>
+                                        ))}
+                                    </React.Fragment>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         )
     }
@@ -439,276 +398,230 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
     const tbbPositive = budgetSummary.to_be_budgeted >= 0
 
     return (
-        <div className="space-y-5">
-            {/* ── To Be Budgeted Hero ──────────────────────────────────── */}
-            <div className="grid grid-cols-4 gap-3">
-                {/* Ready to Assign — main card */}
+        <div className="space-y-4">
+            {/* ── Ready to Assign ──────────────────────────────────────── */}
+            <div
+                className="rounded-xl border px-5 py-4 self-start inline-flex flex-col"
+                style={{
+                    borderColor: tbbPositive ? 'hsl(38 90% 50% / 0.3)' : 'hsl(350 80% 60% / 0.3)',
+                    background: tbbPositive
+                        ? 'linear-gradient(135deg, hsl(222 20% 11%), hsl(38 90% 50% / 0.06))'
+                        : 'linear-gradient(135deg, hsl(222 20% 11%), hsl(350 80% 60% / 0.06))',
+                }}
+            >
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">
+                    Ready to Assign
+                </p>
                 <div
-                    className="rounded-xl border p-5"
-                    style={{
-                        borderColor: tbbPositive ? 'hsl(38 90% 50% / 0.3)' : 'hsl(350 80% 60% / 0.3)',
-                        background: tbbPositive
-                            ? 'linear-gradient(135deg, hsl(222 20% 11%), hsl(38 90% 50% / 0.06))'
-                            : 'linear-gradient(135deg, hsl(222 20% 11%), hsl(350 80% 60% / 0.06))',
-                    }}
+                    className="font-display text-3xl font-bold financial-figure leading-none"
+                    style={{ color: tbbPositive ? 'hsl(38 90% 58%)' : 'hsl(350 80% 65%)' }}
                 >
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
-                        Ready to Assign
-                    </p>
-                    <div
-                        className="font-display text-4xl font-bold financial-figure leading-none"
-                        style={{ color: tbbPositive ? 'hsl(38 90% 58%)' : 'hsl(350 80% 65%)' }}
-                    >
-                        {formatCurrency(budgetSummary.to_be_budgeted)}
-                    </div>
-                </div>
-
-                {/* Budgeted */}
-                <div className="rounded-xl border p-5 bg-card/40">
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">Budgeted</p>
-                    <div className="font-display text-2xl font-bold financial-figure text-foreground/80 leading-none">
-                        {formatCurrency(totalBudgeted)}
-                    </div>
-                </div>
-
-                {/* Activity */}
-                <div className="rounded-xl border p-5 bg-card/40">
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">Activity</p>
-                    <div className={`font-display text-2xl font-bold financial-figure leading-none ${totalActivity < 0 ? 'text-destructive/80' : 'text-primary/80'}`}>
-                        {formatCurrency(totalActivity)}
-                    </div>
-                </div>
-
-                {/* Available */}
-                <div className="rounded-xl border p-5 bg-card/40">
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">Available</p>
-                    <div className={`font-display text-2xl font-bold financial-figure leading-none ${totalAvailable > 0 ? 'text-primary/80' : totalAvailable < 0 ? 'text-destructive/80' : 'text-muted-foreground'}`}>
-                        {formatCurrency(totalAvailable)}
-                    </div>
+                    {formatCurrency(budgetSummary.to_be_budgeted)}
                 </div>
             </div>
 
             {/* ── Budget Table ─────────────────────────────────────────── */}
-            <Card>
-                <CardHeader className="pb-0">
-                    <div className="flex items-center justify-between">
-                        <CardTitle className="text-base font-semibold">Categories</CardTitle>
-                        <div className="flex items-center gap-2">
-                            <Button variant="ghost" size="sm" onClick={() => setShowMoveMoney(true)} className="text-muted-foreground hover:text-foreground h-8 px-3">
-                                <ArrowLeftRight className="h-3.5 w-3.5 mr-1.5" />
-                                Move Money
-                            </Button>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={handleCopyLastMonth}
-                                disabled={copyingLastMonth}
-                                className="text-muted-foreground hover:text-foreground h-8 px-3"
-                            >
-                                <Copy className="h-3.5 w-3.5 mr-1.5" />
-                                {copyingLastMonth ? 'Copying…' : 'Copy Last Month'}
-                            </Button>
-                            <Button
-                                size="sm"
-                                onClick={() => setShowAddCategory(true)}
-                                className="h-8 px-3"
-                            >
-                                <Plus className="h-3.5 w-3.5 mr-1.5" />
-                                Add Category
-                            </Button>
-                        </div>
-                    </div>
-                </CardHeader>
-                <CardContent className="p-0 mt-4">
-                    <div className="overflow-x-auto">
-                        <table className="budget-table">
-                            <thead>
-                                <tr>
-                                    <th className="w-2/5 pl-4">Category</th>
-                                    <th className="w-1/5 text-right">Assigned</th>
-                                    <th className="w-1/5 text-right">Outflow</th>
-                                    <th className="w-1/5 text-right pr-4">Available</th>
-                                    <th className="w-20"></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {Object.entries(grouped).map(([groupName, groupCategories]) => {
-                                    const isCollapsed = collapsedGroups.has(groupName)
-                                    const groupBudgeted = groupCategories.reduce((s, c) => s + c.budgeted_amount, 0)
-                                    const groupActivity = groupCategories.reduce((s, c) => s + c.activity_amount, 0)
-                                    const groupAvailable = groupCategories.reduce((s, c) => s + c.available_amount, 0)
+            <div>
+                {/* Toolbar */}
+                <div className="flex items-center gap-1 mb-1 px-1">
+                    <Button variant="ghost" size="sm" onClick={() => setShowAddCategory(true)} className="text-muted-foreground hover:text-foreground h-7 px-2 text-xs">
+                        <Plus className="h-3 w-3 mr-1" />
+                        Add Category
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setShowMoveMoney(true)} className="text-muted-foreground hover:text-foreground h-7 px-2 text-xs">
+                        <ArrowLeftRight className="h-3 w-3 mr-1" />
+                        Move Money
+                    </Button>
+                </div>
 
-                                    return (
-                                        <React.Fragment key={groupName}>
-                                            {/* Group header row */}
-                                            <tr
-                                                className="category-group cursor-pointer select-none"
-                                                onClick={() => toggleGroup(groupName)}
-                                            >
-                                                <td className="pl-4">
-                                                    <div className="flex items-center gap-2">
-                                                        {isCollapsed
-                                                            ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                                                            : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                                                        }
-                                                        <span>{groupName}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="text-right financial-figure text-muted-foreground text-xs font-bold">
-                                                    {formatCurrency(groupBudgeted)}
-                                                </td>
-                                                <td className="text-right financial-figure text-xs text-muted-foreground font-bold">
-                                                    {formatCurrency(groupActivity)}
-                                                </td>
-                                                <td className={`text-right pr-4 financial-figure text-xs font-bold ${groupAvailable < 0 ? 'text-destructive/80' : groupAvailable > 0 ? 'text-primary/80' : 'text-muted-foreground'}`}>
-                                                    {formatCurrency(groupAvailable)}
-                                                </td>
-                                                <td></td>
-                                            </tr>
+                <div className="overflow-x-auto">
+                    <table className="budget-table">
+                        <thead>
+                            <tr>
+                                <th className="pl-4 text-left">Category</th>
+                                <th className="w-36 text-right">Assigned</th>
+                                <th className="w-36 text-right">Outflow</th>
+                                <th className="w-36 text-right">Available</th>
+                                <th className="w-16"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {Object.entries(grouped).map(([groupName, groupCategories]) => {
+                                const isCollapsed = collapsedGroups.has(groupName)
+                                const groupBudgeted = groupCategories.reduce((s, c) => s + c.budgeted_amount, 0)
+                                const groupActivity = groupCategories.reduce((s, c) => s + c.activity_amount, 0)
+                                const groupAvailable = groupCategories.reduce((s, c) => s + c.available_amount, 0)
 
-                                            {/* Category rows */}
-                                            {!isCollapsed && groupCategories.map((category) => (
-                                                <tr key={category.id} className="group">
-                                                    <td className="category-name">
-                                                        {renamingCategory?.id === category.id ? (
-                                                            <Input
-                                                                value={renamingCategory.name}
-                                                                onChange={(e) => setRenamingCategory({ id: category.id, name: e.target.value })}
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === 'Enter') handleRenameSave(category.id, renamingCategory.name)
-                                                                    if (e.key === 'Escape') setRenamingCategory(null)
-                                                                }}
-                                                                onBlur={() => handleRenameSave(category.id, renamingCategory.name)}
-                                                                className="h-7 text-sm py-0 bg-muted border-border"
-                                                                autoFocus
-                                                            />
-                                                        ) : (
-                                                            <div>
-                                                                <span className="text-sm text-foreground/90">{category.name}</span>
-                                                                {category.goal && (
-                                                                    <GoalProgress
-                                                                        goal={category.goal}
-                                                                        available={category.available_amount}
-                                                                    />
-                                                                )}
-                                                            </div>
-                                                        )}
-                                                    </td>
-                                                    <td className="text-right">
-                                                        {editingCell === category.id ? (
-                                                            <Input
-                                                                type="text"
-                                                                inputMode="decimal"
-                                                                value={editingValue}
-                                                                onChange={(e) => setEditingValue(e.target.value)}
-                                                                onKeyDown={(e) => handleKeyDown(e, category.id)}
-                                                                onBlur={() => handleBudgetSave(category.id)}
-                                                                onFocus={(e) => e.target.select()}
-                                                                className="budgeted-input"
-                                                                autoFocus
-                                                            />
-                                                        ) : (
-                                                            <span
-                                                                className="cursor-pointer hover:bg-muted/60 py-1 rounded text-sm financial-figure text-foreground/80 inline-block"
-                                                                onClick={() => handleBudgetEdit(category.id, category.budgeted_amount)}
-                                                            >
-                                                                {formatCurrency(category.budgeted_amount)}
-                                                            </span>
-                                                        )}
-                                                    </td>
-                                                    <td className="text-right text-sm financial-figure text-muted-foreground">
-                                                        {formatCurrency(category.activity_amount)}
-                                                    </td>
-                                                    <td className="text-right pr-4">
-                                                        {category.available_amount !== 0 ? (
-                                                            <Popover
-                                                                open={openPopoverCategoryId === category.id}
-                                                                onOpenChange={(open) => setOpenPopoverCategoryId(open ? category.id : null)}
-                                                            >
-                                                                <PopoverTrigger asChild>
-                                                                    <span
-                                                                        className={`${getAvailableClass(category.available_amount)} cursor-pointer`}
-                                                                        title="Click to move money"
-                                                                    >
-                                                                        {formatCurrency(category.available_amount)}
-                                                                    </span>
-                                                                </PopoverTrigger>
-                                                                <PopoverContent side="left" align="center" className="w-80">
-                                                                    {openPopoverCategoryId === category.id && budgetSummary && (
-                                                                        <MoveMoneyCategoryPopover
-                                                                            budgetSummary={budgetSummary}
-                                                                            sourceCategoryId={category.id}
-                                                                            initialAmount={category.available_amount}
-                                                                            onMoved={handlePopoverMoved}
-                                                                            onClose={() => setOpenPopoverCategoryId(null)}
-                                                                        />
-                                                                    )}
-                                                                </PopoverContent>
-                                                            </Popover>
-                                                        ) : (
-                                                            <span className={getAvailableClass(category.available_amount)}>
-                                                                {formatCurrency(category.available_amount)}
-                                                            </span>
-                                                        )}
-                                                    </td>
-                                                    <td className="text-center">
-                                                        <div className="flex items-center justify-center gap-0.5">
-                                                            {!category.is_system && (
-                                                                <button
-                                                                    title="Set Goal"
-                                                                    className={`p-1 rounded hover:bg-muted transition-colors ${category.goal ? 'text-primary' : 'text-muted-foreground/30 hover:text-muted-foreground'}`}
-                                                                    onClick={() => setGoalModal({ categoryId: category.id, categoryName: category.name, goal: category.goal })}
-                                                                >
-                                                                    <Target className="h-3.5 w-3.5" />
-                                                                </button>
-                                                            )}
-                                                            {!category.is_system && (
-                                                                <button
-                                                                    title="Rename"
-                                                                    className="p-1 rounded hover:bg-muted text-muted-foreground/30 hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-all"
-                                                                    onClick={() => setRenamingCategory({ id: category.id, name: category.name })}
-                                                                >
-                                                                    <Pencil className="h-3.5 w-3.5" />
-                                                                </button>
-                                                            )}
-                                                            {!category.is_system && (
-                                                                <button
-                                                                    title="Delete"
-                                                                    className="p-1 rounded hover:bg-destructive/10 text-muted-foreground/30 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
-                                                                    onClick={() => handleDeleteCategory(category)}
-                                                                >
-                                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                                </button>
+                                return (
+                                    <React.Fragment key={groupName}>
+                                        {/* Group header row */}
+                                        <tr
+                                            className="category-group cursor-pointer select-none"
+                                            onClick={() => toggleGroup(groupName)}
+                                        >
+                                            <td>
+                                                <div className="flex items-center gap-1.5">
+                                                    {isCollapsed
+                                                        ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                                                        : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                                                    }
+                                                    <span>{groupName}</span>
+                                                </div>
+                                            </td>
+                                            <td className="w-36 text-right financial-figure text-muted-foreground text-xs font-bold">
+                                                {formatCurrency(groupBudgeted)}
+                                            </td>
+                                            <td className="w-36 text-right financial-figure text-xs text-muted-foreground font-bold">
+                                                {formatCurrency(groupActivity)}
+                                            </td>
+                                            <td className={`w-36 text-right financial-figure text-xs font-bold ${groupAvailable < 0 ? 'text-destructive/80' : groupAvailable > 0 ? 'text-primary/80' : 'text-muted-foreground'}`}>
+                                                {formatCurrency(groupAvailable)}
+                                            </td>
+                                            <td></td>
+                                        </tr>
+
+                                        {/* Category rows */}
+                                        {!isCollapsed && groupCategories.map((category) => (
+                                            <tr key={category.id} className="group">
+                                                <td className="category-name">
+                                                    {renamingCategory?.id === category.id ? (
+                                                        <Input
+                                                            value={renamingCategory.name}
+                                                            onChange={(e) => setRenamingCategory({ id: category.id, name: e.target.value })}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') handleRenameSave(category.id, renamingCategory.name)
+                                                                if (e.key === 'Escape') setRenamingCategory(null)
+                                                            }}
+                                                            onBlur={() => handleRenameSave(category.id, renamingCategory.name)}
+                                                            className="h-7 text-sm py-0 bg-muted border-border"
+                                                            autoFocus
+                                                        />
+                                                    ) : (
+                                                        <div>
+                                                            <span className="text-sm text-foreground/90">{category.name}</span>
+                                                            {category.goal && (
+                                                                <GoalProgress
+                                                                    goal={category.goal}
+                                                                    available={category.available_amount}
+                                                                />
                                                             )}
                                                         </div>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </React.Fragment>
-                                    )
-                                })}
+                                                    )}
+                                                </td>
+                                                <td className="w-36 text-right">
+                                                    {editingCell === category.id ? (
+                                                        <Input
+                                                            type="text"
+                                                            inputMode="decimal"
+                                                            value={editingValue}
+                                                            onChange={(e) => setEditingValue(e.target.value)}
+                                                            onKeyDown={(e) => handleKeyDown(e, category.id)}
+                                                            onBlur={() => handleBudgetSave(category.id)}
+                                                            onFocus={(e) => e.target.select()}
+                                                            className="budgeted-input"
+                                                            autoFocus
+                                                        />
+                                                    ) : (
+                                                        <span
+                                                            className="cursor-pointer hover:bg-muted/60 py-1 rounded text-sm financial-figure text-foreground/80 inline-block"
+                                                            onClick={() => handleBudgetEdit(category.id, category.budgeted_amount)}
+                                                        >
+                                                            {formatCurrency(category.budgeted_amount)}
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="w-36 text-right text-sm financial-figure text-muted-foreground">
+                                                    {formatCurrency(category.activity_amount)}
+                                                </td>
+                                                <td className="w-36 text-right">
+                                                    {category.available_amount !== 0 ? (
+                                                        <Popover
+                                                            open={openPopoverCategoryId === category.id}
+                                                            onOpenChange={(open) => setOpenPopoverCategoryId(open ? category.id : null)}
+                                                        >
+                                                            <PopoverTrigger asChild>
+                                                                <span
+                                                                    className={`${getAvailableClass(category.available_amount)} cursor-pointer`}
+                                                                    title="Click to move money"
+                                                                >
+                                                                    {formatCurrency(category.available_amount)}
+                                                                </span>
+                                                            </PopoverTrigger>
+                                                            <PopoverContent side="left" align="center" className="w-80">
+                                                                {openPopoverCategoryId === category.id && budgetSummary && (
+                                                                    <MoveMoneyCategoryPopover
+                                                                        budgetSummary={budgetSummary}
+                                                                        sourceCategoryId={category.id}
+                                                                        initialAmount={category.available_amount}
+                                                                        onMoved={handlePopoverMoved}
+                                                                        onClose={() => setOpenPopoverCategoryId(null)}
+                                                                    />
+                                                                )}
+                                                            </PopoverContent>
+                                                        </Popover>
+                                                    ) : (
+                                                        <span className={getAvailableClass(category.available_amount)}>
+                                                            {formatCurrency(category.available_amount)}
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="w-16 text-center">
+                                                    <div className="flex items-center justify-center gap-0.5">
+                                                        {!category.is_system && (
+                                                            <button
+                                                                title="Set Goal"
+                                                                className={`p-1 rounded hover:bg-muted transition-colors ${category.goal ? 'text-primary' : 'text-muted-foreground/30 hover:text-muted-foreground'}`}
+                                                                onClick={() => setGoalModal({ categoryId: category.id, categoryName: category.name, goal: category.goal })}
+                                                            >
+                                                                <Target className="h-3.5 w-3.5" />
+                                                            </button>
+                                                        )}
+                                                        {!category.is_system && (
+                                                            <button
+                                                                title="Rename"
+                                                                className="p-1 rounded hover:bg-muted text-muted-foreground/30 hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-all"
+                                                                onClick={() => setRenamingCategory({ id: category.id, name: category.name })}
+                                                            >
+                                                                <Pencil className="h-3.5 w-3.5" />
+                                                            </button>
+                                                        )}
+                                                        {!category.is_system && (
+                                                            <button
+                                                                title="Delete"
+                                                                className="p-1 rounded hover:bg-destructive/10 text-muted-foreground/30 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
+                                                                onClick={() => handleDeleteCategory(category)}
+                                                            >
+                                                                <Trash2 className="h-3.5 w-3.5" />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </React.Fragment>
+                                )
+                            })}
 
-                                {/* Totals row */}
-                                <tr style={{ backgroundColor: 'hsl(var(--secondary))' }}>
-                                    <td className="pl-4 text-sm font-semibold text-foreground/70">Total</td>
-                                    <td className="text-right text-sm financial-figure font-semibold text-foreground/70">
-                                        {formatCurrency(totalBudgeted)}
-                                    </td>
-                                    <td className="text-right text-sm financial-figure font-semibold text-muted-foreground">
-                                        {formatCurrency(totalActivity)}
-                                    </td>
-                                    <td className="text-right pr-4">
-                                        <span className={getAvailableClass(totalAvailable)}>
-                                            {formatCurrency(totalAvailable)}
-                                        </span>
-                                    </td>
-                                    <td></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </CardContent>
-            </Card>
+                            {/* Totals row */}
+                            <tr style={{ backgroundColor: 'hsl(var(--secondary))' }}>
+                                <td className="pl-4 text-sm font-semibold text-foreground/70">Total</td>
+                                <td className="w-36 text-right text-sm financial-figure font-semibold text-foreground/70">
+                                    {formatCurrency(totalBudgeted)}
+                                </td>
+                                <td className="w-36 text-right text-sm financial-figure font-semibold text-muted-foreground">
+                                    {formatCurrency(totalActivity)}
+                                </td>
+                                <td className="w-36 text-right">
+                                    <span className={getAvailableClass(totalAvailable)}>
+                                        {formatCurrency(totalAvailable)}
+                                    </span>
+                                </td>
+                                <td></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
 
             <AddCategoryModal
                 open={showAddCategory}

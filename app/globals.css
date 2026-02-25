@@ -48,15 +48,14 @@
   }
 
   .budget-table th {
-    @apply p-3 text-xs font-semibold uppercase tracking-wider;
+    @apply px-3 py-2 text-xs font-semibold uppercase tracking-wider;
     color: hsl(var(--muted-foreground));
-    background-color: hsl(var(--secondary));
     border-bottom: 1px solid hsl(var(--border));
   }
 
   .budget-table td {
-    @apply p-3;
-    border-bottom: 1px solid hsl(var(--border) / 0.5);
+    @apply px-3 py-2.5;
+    border-bottom: 1px solid hsl(var(--border) / 0.4);
   }
 
   .budget-table tbody tr:hover td {
