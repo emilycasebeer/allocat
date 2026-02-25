@@ -29,7 +29,7 @@ export function TopNav() {
                         <span className="text-sm leading-none">🐱</span>
                     </div>
                     <span className="font-display text-lg font-bold tracking-tight text-foreground">
-                        alloc<span className="text-primary">at</span>
+                        allo<span className="text-primary">cat</span>
                     </span>
                 </div>
 
