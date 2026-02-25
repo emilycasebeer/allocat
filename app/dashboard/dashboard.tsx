@@ -227,26 +227,28 @@ export function Dashboard() {
                 <div className="flex-1 flex flex-col min-w-0">
                     {/* Sub-header: month nav + view tabs */}
                     <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card/40 backdrop-blur-sm">
-                        {/* Month navigator */}
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => handleMonthChange('prev')}
-                                className="h-8 w-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                                aria-label="Previous month"
-                            >
-                                <ChevronLeft className="h-4 w-4" />
-                            </button>
-                            <span className="font-display text-base font-bold text-foreground min-w-[152px] text-center select-none">
-                                {monthLabel}
-                            </span>
-                            <button
-                                onClick={() => handleMonthChange('next')}
-                                className="h-8 w-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                                aria-label="Next month"
-                            >
-                                <ChevronRight className="h-4 w-4" />
-                            </button>
-                        </div>
+                        {/* Month navigator — only shown on Budget view */}
+                        {currentView === 'budget' ? (
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => handleMonthChange('prev')}
+                                    className="h-8 w-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                    aria-label="Previous month"
+                                >
+                                    <ChevronLeft className="h-4 w-4" />
+                                </button>
+                                <span className="font-display text-base font-bold text-foreground min-w-[152px] text-center select-none">
+                                    {monthLabel}
+                                </span>
+                                <button
+                                    onClick={() => handleMonthChange('next')}
+                                    className="h-8 w-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                    aria-label="Next month"
+                                >
+                                    <ChevronRight className="h-4 w-4" />
+                                </button>
+                            </div>
+                        ) : <div />}
 
                         {/* View tabs + utilities */}
                         <div className="flex items-center gap-2">

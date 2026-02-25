@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react'
 import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -94,6 +94,11 @@ const formatDate = (dateString: string) => {
 
 const formatAmount = (amount: number) =>
     `$${Math.abs(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+const formatBalance = (amount: number) => {
+    const abs = `$${Math.abs(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    return amount < 0 ? `-${abs}` : abs
+}
 
 export function TransactionsView({
     account, accounts, categories, onBalanceDelta, currentMonth, currentYear
@@ -284,6 +289,18 @@ export function TransactionsView({
         setEndDate('')
     }
 
+    const clearedBalance = useMemo(() =>
+        transactions
+            .filter(t => t.cleared === 'cleared' || t.cleared === 'reconciled')
+            .reduce((sum, t) => sum + t.amount, 0),
+        [transactions])
+
+    const unclearedBalance = useMemo(() =>
+        transactions
+            .filter(t => t.cleared === 'uncleared')
+            .reduce((sum, t) => sum + t.amount, 0),
+        [transactions])
+
     if (!account) {
         return (
             <div className="flex items-center justify-center h-64">
@@ -296,14 +313,18 @@ export function TransactionsView({
         return (
             <div className="space-y-4">
                 {/* Account header skeleton */}
-                <div className="flex items-center justify-between animate-pulse">
-                    <div>
-                        <div className="h-6 w-36 bg-muted rounded" />
-                        <div className="h-3 w-20 bg-muted rounded mt-2" />
+                <div className="space-y-3 animate-pulse">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <div className="h-6 w-36 bg-muted rounded" />
+                            <div className="h-3 w-20 bg-muted rounded mt-2" />
+                        </div>
+                        <div className="h-8 w-24 bg-muted rounded" />
                     </div>
-                    <div className="text-right">
-                        <div className="h-8 w-28 bg-muted rounded ml-auto" />
-                        <div className="h-3 w-24 bg-muted rounded mt-2 ml-auto" />
+                    <div className="flex items-center gap-6">
+                        <div className="h-8 w-28 bg-muted rounded" />
+                        <div className="h-8 w-28 bg-muted rounded" />
+                        <div className="h-8 w-28 bg-muted rounded" />
                     </div>
                 </div>
                 {/* Filter bar skeleton */}
@@ -313,8 +334,7 @@ export function TransactionsView({
                             <div className="h-8 w-52 bg-muted rounded-lg" />
                             <div className="h-8 flex-1 bg-muted rounded-lg" />
                             <div className="h-8 w-64 bg-muted rounded-lg" />
-                            <div className="ml-auto flex gap-2">
-                                <div className="h-8 w-24 bg-muted rounded" />
+                            <div className="ml-auto">
                                 <div className="h-8 w-32 bg-muted rounded" />
                             </div>
                         </div>
@@ -327,22 +347,19 @@ export function TransactionsView({
                             <table className="w-full">
                                 <thead>
                                     <tr style={{ backgroundColor: 'hsl(var(--secondary))' }}>
-                                        <th className="w-8 py-3 px-3" />
-                                        <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground w-28">Date</th>
+                                        <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap">Date</th>
                                         <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Payee</th>
                                         <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Category</th>
                                         <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Memo</th>
                                         <th className="text-right py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground w-28">Outflow</th>
                                         <th className="text-right py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground w-28">Inflow</th>
                                         <th className="w-16" />
+                                        <th className="w-10" />
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {[...Array(8)].map((_, i) => (
                                         <tr key={i} className="border-t animate-pulse" style={{ borderColor: 'hsl(var(--border) / 0.5)' }}>
-                                            <td className="py-3 px-3">
-                                                <div className="h-2.5 w-2.5 rounded-full bg-muted mx-auto" />
-                                            </td>
                                             <td className="py-3 px-3">
                                                 <div className="h-3 w-16 bg-muted rounded" />
                                             </td>
@@ -362,6 +379,9 @@ export function TransactionsView({
                                                 {i % 3 === 0 && <div className="h-3 w-14 bg-muted rounded ml-auto" />}
                                             </td>
                                             <td />
+                                            <td className="py-3 px-3">
+                                                <div className="h-2.5 w-2.5 rounded-full bg-muted mx-auto" />
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -373,21 +393,58 @@ export function TransactionsView({
         )
     }
 
-    const balanceDisplay = `${account.is_liability ? '-' : ''}$${Math.abs(account.balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-
     return (
         <div className="space-y-4">
             {/* ── Account Header ───────────────────────────────────────── */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="font-display text-xl font-bold text-foreground">{account.name}</h2>
-                    <p className="text-sm text-muted-foreground mt-0.5">{account.type_name}</p>
-                </div>
-                <div className="text-right">
-                    <div className={`font-display text-2xl font-bold financial-figure ${account.is_liability ? 'text-destructive' : 'text-foreground'}`}>
-                        {balanceDisplay}
+            <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h2 className="font-display text-xl font-bold text-foreground">{account.name}</h2>
+                        <p className="text-sm text-muted-foreground mt-0.5">{account.type_name}</p>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">Working Balance</p>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowReconcile(true)}
+                            className="h-8 px-3 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                            <Scale className="h-3.5 w-3.5 mr-1.5" />
+                            Reconcile
+                        </Button>
+                    </div>
+                </div>
+                {/* 3-part balance row */}
+                <div className="flex items-center gap-6">
+                    {/* Cleared Balance */}
+                    <div className="flex items-center gap-2">
+                        <div className="h-2.5 w-2.5 rounded-full bg-primary flex-shrink-0" />
+                        <div>
+                            <div className={`font-display text-lg font-bold financial-figure tabular-nums ${clearedBalance < 0 ? 'text-destructive' : 'text-foreground'}`}>
+                                {formatBalance(clearedBalance)}
+                            </div>
+                            <p className="text-xs text-muted-foreground">Cleared Balance</p>
+                        </div>
+                    </div>
+                    <span className="text-muted-foreground/40 text-base font-light select-none">+</span>
+                    {/* Uncleared Balance */}
+                    <div className="flex items-center gap-2">
+                        <div className="h-2.5 w-2.5 rounded-full border border-muted-foreground/40 flex-shrink-0" />
+                        <div>
+                            <div className={`font-display text-lg font-bold financial-figure tabular-nums ${unclearedBalance < 0 ? 'text-destructive' : 'text-foreground'}`}>
+                                {formatBalance(unclearedBalance)}
+                            </div>
+                            <p className="text-xs text-muted-foreground">Uncleared Balance</p>
+                        </div>
+                    </div>
+                    <span className="text-muted-foreground/40 text-base font-light select-none">=</span>
+                    {/* Working Balance */}
+                    <div>
+                        <div className={`font-display text-lg font-bold financial-figure tabular-nums ${account.balance < 0 ? 'text-destructive' : 'text-foreground'}`}>
+                            {formatBalance(account.balance)}
+                        </div>
+                        <p className="text-xs text-muted-foreground">Working Balance</p>
+                    </div>
                 </div>
             </div>
 
@@ -471,15 +528,6 @@ export function TransactionsView({
                         {/* Actions */}
                         <div className="ml-auto flex items-center gap-2">
                             <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setShowReconcile(true)}
-                                className="h-8 px-3 text-xs text-muted-foreground hover:text-foreground"
-                            >
-                                <Scale className="h-3.5 w-3.5 mr-1.5" />
-                                Reconcile
-                            </Button>
-                            <Button
                                 size="sm"
                                 onClick={() => setShowAddTransaction(true)}
                                 className="h-8 px-3 text-xs"
@@ -505,14 +553,14 @@ export function TransactionsView({
                             <table className="w-full">
                                 <thead>
                                     <tr style={{ backgroundColor: 'hsl(var(--secondary))' }}>
-                                        <th className="w-8 py-3 px-3"></th>
-                                        <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Date</th>
+                                        <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap">Date</th>
                                         <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Payee</th>
                                         <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Category</th>
                                         <th className="text-left py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Memo</th>
                                         <th className="text-right py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground w-28">Outflow</th>
                                         <th className="text-right py-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground w-28">Inflow</th>
                                         <th className="w-16"></th>
+                                        <th className="w-10"></th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -525,15 +573,6 @@ export function TransactionsView({
                                                     className="group border-t hover:bg-muted/30 transition-colors"
                                                     style={{ borderColor: 'hsl(var(--border) / 0.5)' }}
                                                 >
-                                                    {/* Cleared indicator */}
-
-                                                    <td className="py-3 px-3 text-center">
-                                                        <ClearedDot
-                                                            cleared={transaction.cleared}
-                                                            onClick={() => handleClearedToggle(transaction)}
-                                                        />
-                                                    </td>
-
                                                     {/* Date */}
                                                     <td className="py-3 px-3 text-sm text-muted-foreground whitespace-nowrap">
                                                         {formatDate(transaction.date)}
@@ -620,6 +659,14 @@ export function TransactionsView({
                                                             </button>
                                                         </div>
                                                     </td>
+
+                                                    {/* Cleared indicator (last column) */}
+                                                    <td className="py-3 px-3 text-center">
+                                                        <ClearedDot
+                                                            cleared={transaction.cleared}
+                                                            onClick={() => handleClearedToggle(transaction)}
+                                                        />
+                                                    </td>
                                                 </tr>
 
                                                 {/* Split rows */}
@@ -634,7 +681,6 @@ export function TransactionsView({
                                                     >
                                                         <td></td>
                                                         <td></td>
-                                                        <td></td>
                                                         <td className="py-1.5 px-3 pl-10 text-xs text-muted-foreground">
                                                             {split.category_name
                                                                 ? `${split.group_name} · ${split.category_name}`
@@ -644,8 +690,11 @@ export function TransactionsView({
                                                         <td className="py-1.5 px-3 text-xs text-muted-foreground/60 italic">
                                                             {split.memo || '—'}
                                                         </td>
-                                                        <td className={`py-1.5 px-3 text-xs font-semibold text-right financial-figure ${split.amount >= 0 ? 'text-primary/70' : 'text-destructive/70'}`}>
-                                                            {formatAmount(split.amount)}
+                                                        <td className="py-1.5 px-3 text-xs font-semibold text-right financial-figure text-destructive/70 tabular-nums">
+                                                            {split.amount < 0 ? formatAmount(split.amount) : ''}
+                                                        </td>
+                                                        <td className="py-1.5 px-3 text-xs font-semibold text-right financial-figure text-primary/70 tabular-nums">
+                                                            {split.amount >= 0 ? formatAmount(split.amount) : ''}
                                                         </td>
                                                         <td colSpan={2}></td>
                                                     </tr>

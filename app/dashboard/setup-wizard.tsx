@@ -75,13 +75,12 @@ function StepDots({ current, total }: { current: number; total: number }) {
             {Array.from({ length: total }).map((_, i) => (
                 <div
                     key={i}
-                    className={`h-2 rounded-full transition-all ${
-                        i === current
-                            ? 'w-6 bg-emerald-600'
-                            : i < current
+                    className={`h-2 rounded-full transition-all ${i === current
+                        ? 'w-6 bg-emerald-600'
+                        : i < current
                             ? 'w-2 bg-emerald-400'
                             : 'w-2 bg-gray-300'
-                    }`}
+                        }`}
                 />
             ))}
         </div>
