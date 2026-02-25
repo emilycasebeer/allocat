@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, LayoutList, BarChart3, Landmark, ChevronDown, ChevronRight, CalendarClock } from 'lucide-react'
+import { Plus, LayoutList, BarChart3, Landmark, ChevronDown, ChevronRight, CalendarClock, Users } from 'lucide-react'
 import { AddAccountModal } from '@/app/dashboard/add-account-modal'
 import type { Account } from '@/app/dashboard/dashboard'
 import Decimal from 'decimal.js'
@@ -13,6 +13,7 @@ interface SidebarProps {
     onAccountAdded: () => void
     currentView: string
     onViewChange: (view: string) => void
+    onManagePayees: () => void
 }
 
 function groupAccounts(accounts: Account[]) {
@@ -128,7 +129,7 @@ function AccountGroup({
     )
 }
 
-export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountAdded, currentView, onViewChange }: SidebarProps) {
+export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountAdded, currentView, onViewChange, onManagePayees }: SidebarProps) {
     const [showAddAccount, setShowAddAccount] = useState(false)
 
     const { cash, credit, tracking, closed } = groupAccounts(accounts)
@@ -174,6 +175,13 @@ export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountA
                         <Landmark className="h-4 w-4 flex-shrink-0" />
                         All Accounts
                     </button>
+                    <button
+                        onClick={onManagePayees}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                    >
+                        <Users className="h-4 w-4 flex-shrink-0" />
+                        Edit Payees
+                    </button>
                 </div>
 
                 <div className="h-px bg-border/40 mb-3" />
@@ -181,7 +189,7 @@ export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountA
                 {/* Account groups */}
                 {accounts.length === 0 ? (
                     <p className="text-xs text-muted-foreground text-center mt-8 px-2">
-                        No accounts yet. Add one below.
+                        No accounts yet.
                     </p>
                 ) : (
                     <div className="space-y-1">
@@ -191,17 +199,17 @@ export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountA
                         <AccountGroup label="Closed" accounts={closed} selectedAccount={selectedAccount} onAccountSelect={onAccountSelect} defaultCollapsed />
                     </div>
                 )}
-            </div>
 
-            {/* Add Account button */}
-            <div className="px-3 py-3 border-t border-border">
-                <button
-                    onClick={() => setShowAddAccount(true)}
-                    className="w-full flex items-center justify-center gap-2 h-9 rounded-lg border border-border/60 bg-muted/20 hover:bg-muted/50 text-sm font-medium text-muted-foreground hover:text-foreground transition-all"
-                >
-                    <Plus className="h-4 w-4" />
-                    Add Account
-                </button>
+                {/* Add Account — sits just below the last account */}
+                <div className="mt-3 px-1">
+                    <button
+                        onClick={() => setShowAddAccount(true)}
+                        className="w-full flex items-center justify-center gap-2 h-9 rounded-lg bg-primary/90 hover:bg-primary text-primary-foreground text-sm font-semibold transition-colors"
+                    >
+                        <Plus className="h-4 w-4" />
+                        Add Account
+                    </button>
+                </div>
             </div>
 
             <AddAccountModal

@@ -14,7 +14,7 @@ import { ManagePayeesModal } from '@/app/dashboard/manage-payees-modal'
 const ScheduledTransactionsView = dynamic(() => import('@/app/dashboard/scheduled-transactions-view').then(m => ({ default: m.ScheduledTransactionsView })))
 const ReportsView = dynamic(() => import('@/app/dashboard/reports-view').then(m => ({ default: m.ReportsView })))
 import { SetupWizard } from '@/app/dashboard/setup-wizard'
-import { ChevronLeft, ChevronRight, Users } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 export interface Account {
     id: string
@@ -49,6 +49,7 @@ export function Dashboard() {
     const [selectedAccount, setSelectedAccount] = useState<Account | null>(null)
     const [currentView, setCurrentView] = useState<ViewType>('budget')
     const [showManagePayees, setShowManagePayees] = useState(false)
+    const [tbb, setTbb] = useState<number | null>(null)
     const [showWizard, setShowWizard] = useState(false)
     // Start unchecked to match SSR; synchronously resolved from localStorage before first paint.
     const [wizardChecked, setWizardChecked] = useState(false)
@@ -216,12 +217,14 @@ export function Dashboard() {
                     }}
                     currentView={currentView}
                     onViewChange={(view) => setCurrentView(view as ViewType)}
+                    onManagePayees={() => setShowManagePayees(true)}
                 />
 
                 <div className="flex-1 flex flex-col min-w-0">
-                    {/* Sub-header: only shown on budget view for month nav + utilities */}
+                    {/* Sub-header: month nav + centered RTA — budget view only */}
                     {currentView === 'budget' && (
-                        <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card/40 backdrop-blur-sm">
+                        <div className="grid grid-cols-3 items-center px-6 pt-5 pb-2">
+                            {/* Left: month navigation */}
                             <div className="flex items-center gap-2">
                                 <button
                                     onClick={() => handleMonthChange('prev')}
@@ -242,18 +245,43 @@ export function Dashboard() {
                                 </button>
                             </div>
 
-                            <button
-                                onClick={() => setShowManagePayees(true)}
-                                title="Manage Payees"
-                                className="h-8 w-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                            >
-                                <Users className="h-4 w-4" />
-                            </button>
+                            {/* Center: Ready to Assign */}
+                            <div className="flex justify-center">
+                                {tbb !== null ? (
+                                    <div
+                                        className="rounded-xl border px-5 py-3 flex flex-col items-center"
+                                        style={{
+                                            borderColor: tbb >= 0 ? 'hsl(160 72% 40% / 0.35)' : 'hsl(350 80% 60% / 0.3)',
+                                            background: tbb >= 0
+                                                ? 'linear-gradient(135deg, hsl(222 20% 11%), hsl(160 72% 40% / 0.07))'
+                                                : 'linear-gradient(135deg, hsl(222 20% 11%), hsl(350 80% 60% / 0.06))',
+                                        }}
+                                    >
+                                        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+                                            Ready to Assign
+                                        </p>
+                                        <div
+                                            className="font-display text-2xl font-bold financial-figure leading-none"
+                                            style={{ color: tbb >= 0 ? 'hsl(160 72% 55%)' : 'hsl(350 80% 65%)' }}
+                                        >
+                                            {tbb < 0 ? `-$${Math.abs(tbb).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `$${tbb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="rounded-xl border px-5 py-3 animate-pulse" style={{ borderColor: 'hsl(160 72% 40% / 0.2)', background: 'hsl(222 20% 11%)' }}>
+                                        <div className="h-2 w-20 bg-muted rounded mb-2" />
+                                        <div className="h-6 w-24 bg-muted rounded" />
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Right: spacer (mirrors left for true centering) */}
+                            <div />
                         </div>
                     )}
 
                     {/* View content */}
-                    <div className="flex-1 pt-8 px-6 pb-6 overflow-auto">
+                    <div className="flex-1 pt-4 px-6 pb-6 overflow-auto">
                         {/*
                           TransactionsView is always mounted so its account-keyed cache
                           survives view switches. Hidden via CSS when another view is active.
@@ -278,6 +306,7 @@ export function Dashboard() {
                                 categories={categories}
                                 onCategoryAdded={fetchCategories}
                                 refreshKey={budgetRefreshKey}
+                                onTbbChange={setTbb}
                             />
                         )}
                         {currentView === 'scheduled' && (

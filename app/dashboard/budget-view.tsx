@@ -5,7 +5,6 @@ import { useAuth } from '../providers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Plus, Target, Pencil, Trash2, ArrowLeftRight, ChevronDown, ChevronRight } from 'lucide-react'
-import { AddCategoryModal } from '@/app/dashboard/add-category-modal'
 import { SetGoalModal } from '@/app/dashboard/set-goal-modal'
 import { MoveMoneyModal } from '@/app/dashboard/move-money-modal'
 import { MoveMoneyCategoryPopover } from '@/app/dashboard/move-money-popover'
@@ -38,6 +37,7 @@ interface BudgetViewProps {
     categories: Category[]
     onCategoryAdded: () => void
     refreshKey?: number
+    onTbbChange?: (tbb: number | null) => void
 }
 
 function GoalProgress({ goal, available }: { goal: CategoryGoal; available: number }) {
@@ -84,7 +84,7 @@ const formatCurrency = (amount: number) => {
     return amount < 0 ? `-$${abs}` : `$${abs}`
 }
 
-export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetViewProps) {
+export function BudgetView({ month, year, onCategoryAdded, refreshKey, onTbbChange }: BudgetViewProps) {
     const { accessToken } = useAuth()
     // Stable ref so fetchMonth (useCallback with [] deps) always reads the current token
     const accessTokenRef = useRef(accessToken)
@@ -94,7 +94,12 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
     const [loading, setLoading] = useState(true)
     const [editingCell, setEditingCell] = useState<string | null>(null)
     const [editingValue, setEditingValue] = useState('')
-    const [showAddCategory, setShowAddCategory] = useState(false)
+    const [showAddGroupPopover, setShowAddGroupPopover] = useState(false)
+    const [newGroupName, setNewGroupName] = useState('')
+    const [addingGroupLoading, setAddingGroupLoading] = useState(false)
+    const [addingCategoryToGroup, setAddingCategoryToGroup] = useState<string | null>(null)
+    const [newCategoryName, setNewCategoryName] = useState('')
+    const [addingCategoryLoading, setAddingCategoryLoading] = useState(false)
     const [goalModal, setGoalModal] = useState<{ categoryId: string; categoryName: string; goal: CategoryGoal | null } | null>(null)
     const [renamingCategory, setRenamingCategory] = useState<{ id: string; name: string } | null>(null)
     const [showMoveMoney, setShowMoveMoney] = useState(false)
@@ -181,6 +186,11 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
 
         prefetchAdjacent(month, year)
     }, [month, year, refreshKey, accessToken, fetchMonth, prefetchAdjacent])
+
+    // Notify parent of current TBB whenever it changes (used to render RTA in the header)
+    useEffect(() => {
+        onTbbChange?.(budgetSummary ? budgetSummary.to_be_budgeted : null)
+    }, [budgetSummary, onTbbChange])
 
     // Keep fetchBudgetSummary for internal use (rename/delete/copy-last-month flows)
     const fetchBudgetSummary = useCallback(() => {
@@ -309,6 +319,62 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
         })
     }
 
+    const handleAddGroup = async () => {
+        const trimmed = newGroupName.trim()
+        if (!trimmed) return
+        setAddingGroupLoading(true)
+        try {
+            const token = accessTokenRef.current
+            if (!token) return
+            const res = await fetch('/api/category-groups', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ name: trimmed }),
+            })
+            if (res.ok) {
+                setShowAddGroupPopover(false)
+                setNewGroupName('')
+                onCategoryAdded()
+                fetchBudgetSummary()
+            } else {
+                const err = await res.json()
+                alert(`Error: ${err.error}`)
+            }
+        } catch (e) {
+            console.error('Error creating group:', e)
+        } finally {
+            setAddingGroupLoading(false)
+        }
+    }
+
+    const handleAddCategoryToGroup = async (groupName: string) => {
+        const trimmed = newCategoryName.trim()
+        if (!trimmed) return
+        setAddingCategoryLoading(true)
+        try {
+            const token = accessTokenRef.current
+            if (!token) return
+            const res = await fetch('/api/categories', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ name: trimmed, group_name: groupName }),
+            })
+            if (res.ok) {
+                setAddingCategoryToGroup(null)
+                setNewCategoryName('')
+                onCategoryAdded()
+                fetchBudgetSummary()
+            } else {
+                const err = await res.json()
+                alert(`Error: ${err.error}`)
+            }
+        } catch (e) {
+            console.error('Error creating category:', e)
+        } finally {
+            setAddingCategoryLoading(false)
+        }
+    }
+
     const getAvailableClass = (available: number) => {
         if (available > 0) return 'available-positive'
         if (available === 0) return 'available-zero'
@@ -318,22 +384,18 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
     if (loading) {
         return (
             <div className="space-y-4">
-                {/* RTA card skeleton */}
-                <div className="rounded-xl border px-5 py-4 inline-flex flex-col animate-pulse" style={{ borderColor: 'hsl(38 90% 50% / 0.2)', background: 'hsl(222 20% 11%)' }}>
-                    <div className="h-2 w-24 bg-muted rounded mb-3" />
-                    <div className="h-8 w-32 bg-muted rounded" />
-                </div>
                 {/* Category table skeleton */}
                 <div>
-                    <div className="flex gap-2 mb-1 px-1 animate-pulse">
-                        <div className="h-7 w-28 bg-muted rounded" />
-                        <div className="h-7 w-24 bg-muted rounded" />
-                    </div>
                     <div className="overflow-x-auto">
                         <table className="budget-table">
                             <thead>
                                 <tr>
-                                    <th className="pl-4 text-left">Category</th>
+                                    <th className="pl-8 text-left">
+                                        <div className="flex gap-2 animate-pulse">
+                                            <div className="h-5 w-28 bg-muted rounded" />
+                                            <div className="h-5 w-24 bg-muted rounded" />
+                                        </div>
+                                    </th>
                                     <th className="w-36 text-right">Assigned</th>
                                     <th className="w-36 text-right">Outflow</th>
                                     <th className="w-36 text-right">Available</th>
@@ -395,50 +457,53 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
         return groups
     }, {} as Record<string, BudgetCategory[]>)
 
-    const tbbPositive = budgetSummary.to_be_budgeted >= 0
-
     return (
         <div className="space-y-4">
-            {/* ── Ready to Assign ──────────────────────────────────────── */}
-            <div
-                className="rounded-xl border px-5 py-4 self-start inline-flex flex-col"
-                style={{
-                    borderColor: tbbPositive ? 'hsl(38 90% 50% / 0.3)' : 'hsl(350 80% 60% / 0.3)',
-                    background: tbbPositive
-                        ? 'linear-gradient(135deg, hsl(222 20% 11%), hsl(38 90% 50% / 0.06))'
-                        : 'linear-gradient(135deg, hsl(222 20% 11%), hsl(350 80% 60% / 0.06))',
-                }}
-            >
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">
-                    Ready to Assign
-                </p>
-                <div
-                    className="font-display text-3xl font-bold financial-figure leading-none"
-                    style={{ color: tbbPositive ? 'hsl(38 90% 58%)' : 'hsl(350 80% 65%)' }}
-                >
-                    {formatCurrency(budgetSummary.to_be_budgeted)}
-                </div>
-            </div>
-
             {/* ── Budget Table ─────────────────────────────────────────── */}
             <div>
-                {/* Toolbar */}
-                <div className="flex items-center gap-1 mb-1 px-1">
-                    <Button variant="ghost" size="sm" onClick={() => setShowAddCategory(true)} className="text-muted-foreground hover:text-foreground h-7 px-2 text-xs">
-                        <Plus className="h-3 w-3 mr-1" />
-                        Add Category
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setShowMoveMoney(true)} className="text-muted-foreground hover:text-foreground h-7 px-2 text-xs">
-                        <ArrowLeftRight className="h-3 w-3 mr-1" />
-                        Move Money
-                    </Button>
-                </div>
-
                 <div className="overflow-x-auto">
                     <table className="budget-table">
                         <thead>
                             <tr>
-                                <th className="pl-4 text-left">Category</th>
+                                <th className="pl-8 text-left">
+                                    <div className="flex items-center gap-1">
+                                        <Popover open={showAddGroupPopover} onOpenChange={(open) => { setShowAddGroupPopover(open); if (!open) setNewGroupName('') }}>
+                                            <PopoverTrigger asChild>
+                                                <Button variant="ghost" size="sm" className="text-primary/70 hover:text-primary hover:bg-primary/10 h-7 px-2 text-xs font-semibold uppercase tracking-wider">
+                                                    <Plus className="h-3 w-3 mr-1" />
+                                                    Category Group
+                                                </Button>
+                                            </PopoverTrigger>
+                                            <PopoverContent side="bottom" align="start" className="w-64 p-3">
+                                                <div className="space-y-2">
+                                                    <Input
+                                                        value={newGroupName}
+                                                        onChange={(e) => setNewGroupName(e.target.value)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') handleAddGroup()
+                                                            if (e.key === 'Escape') { setShowAddGroupPopover(false); setNewGroupName('') }
+                                                        }}
+                                                        placeholder="New Category Group"
+                                                        className="h-8 text-sm"
+                                                        autoFocus
+                                                    />
+                                                    <div className="flex gap-2 justify-end">
+                                                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setShowAddGroupPopover(false); setNewGroupName('') }} disabled={addingGroupLoading}>
+                                                            Cancel
+                                                        </Button>
+                                                        <Button size="sm" className="h-7 text-xs" onClick={handleAddGroup} disabled={addingGroupLoading || !newGroupName.trim()}>
+                                                            {addingGroupLoading ? '…' : 'OK'}
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            </PopoverContent>
+                                        </Popover>
+                                        <Button variant="ghost" size="sm" onClick={() => setShowMoveMoney(true)} className="text-primary/70 hover:text-primary hover:bg-primary/10 h-7 px-2 text-xs font-semibold uppercase tracking-wider">
+                                            <ArrowLeftRight className="h-3 w-3 mr-1" />
+                                            Move Money
+                                        </Button>
+                                    </div>
+                                </th>
                                 <th className="w-36 text-right">Assigned</th>
                                 <th className="w-36 text-right">Outflow</th>
                                 <th className="w-36 text-right">Available</th>
@@ -456,7 +521,7 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
                                     <React.Fragment key={groupName}>
                                         {/* Group header row */}
                                         <tr
-                                            className="category-group cursor-pointer select-none"
+                                            className="category-group group/group cursor-pointer select-none"
                                             onClick={() => toggleGroup(groupName)}
                                         >
                                             <td>
@@ -466,6 +531,46 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
                                                         : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                                                     }
                                                     <span>{groupName}</span>
+                                                    <Popover
+                                                        open={addingCategoryToGroup === groupName}
+                                                        onOpenChange={(open) => {
+                                                            if (!open) { setAddingCategoryToGroup(null); setNewCategoryName('') }
+                                                        }}
+                                                    >
+                                                        <PopoverTrigger asChild>
+                                                            <button
+                                                                className="h-4 w-4 rounded-full flex items-center justify-center flex-shrink-0 opacity-0 group-hover/group:opacity-100 bg-primary hover:bg-primary/80 text-primary-foreground transition-all"
+                                                                title={`Add category to ${groupName}`}
+                                                                onClick={(e) => { e.stopPropagation(); setAddingCategoryToGroup(groupName) }}
+                                                            >
+                                                                <Plus className="h-2.5 w-2.5" />
+                                                            </button>
+                                                        </PopoverTrigger>
+                                                        <PopoverContent side="bottom" align="start" className="w-64 p-3" onClick={(e) => e.stopPropagation()}>
+                                                            <div className="space-y-2">
+                                                                <p className="text-xs font-medium text-muted-foreground">New Category in <span className="text-foreground">{groupName}</span></p>
+                                                                <Input
+                                                                    value={newCategoryName}
+                                                                    onChange={(e) => setNewCategoryName(e.target.value)}
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === 'Enter') handleAddCategoryToGroup(groupName)
+                                                                        if (e.key === 'Escape') { setAddingCategoryToGroup(null); setNewCategoryName('') }
+                                                                    }}
+                                                                    placeholder="Category name"
+                                                                    className="h-8 text-sm"
+                                                                    autoFocus
+                                                                />
+                                                                <div className="flex gap-2 justify-end">
+                                                                    <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); setAddingCategoryToGroup(null); setNewCategoryName('') }} disabled={addingCategoryLoading}>
+                                                                        Cancel
+                                                                    </Button>
+                                                                    <Button size="sm" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); handleAddCategoryToGroup(groupName) }} disabled={addingCategoryLoading || !newCategoryName.trim()}>
+                                                                        {addingCategoryLoading ? '…' : 'OK'}
+                                                                    </Button>
+                                                                </div>
+                                                            </div>
+                                                        </PopoverContent>
+                                                    </Popover>
                                                 </div>
                                             </td>
                                             <td className="w-36 text-right financial-figure text-muted-foreground text-xs font-bold">
@@ -622,16 +727,6 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
                     </table>
                 </div>
             </div>
-
-            <AddCategoryModal
-                open={showAddCategory}
-                onOpenChange={setShowAddCategory}
-                onCategoryAdded={() => {
-                    setShowAddCategory(false)
-                    onCategoryAdded()
-                    fetchBudgetSummary()
-                }}
-            />
 
             {showMoveMoney && budgetSummary && (
                 <MoveMoneyModal
