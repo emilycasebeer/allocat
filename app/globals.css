@@ -64,10 +64,11 @@
   }
 
   .category-group td {
-    background-color: hsl(var(--secondary));
+    background-color: hsl(222 16% 20%);
     color: hsl(var(--foreground));
+    border-top: 1px solid hsl(var(--border));
     border-bottom: 1px solid hsl(var(--border));
-    @apply font-semibold text-sm;
+    @apply font-bold text-sm;
   }
 
   .category-name {
@@ -104,24 +105,23 @@
     @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
     font-family: var(--font-dm-mono), ui-monospace, monospace;
     font-variant-numeric: tabular-nums;
-    background-color: hsl(160 72% 40% / 0.15);
-    color: hsl(160 72% 58%);
+    background-color: hsl(160 72% 40% / 0.22);
+    color: hsl(160 72% 62%);
   }
 
   .available-zero {
-    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
     font-family: var(--font-dm-mono), ui-monospace, monospace;
     font-variant-numeric: tabular-nums;
-    background-color: hsl(38 90% 50% / 0.15);
-    color: hsl(38 90% 65%);
+    color: hsl(var(--muted-foreground));
+    @apply text-xs font-medium;
   }
 
   .available-negative {
     @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
     font-family: var(--font-dm-mono), ui-monospace, monospace;
     font-variant-numeric: tabular-nums;
-    background-color: hsl(350 80% 60% / 0.15);
-    color: hsl(350 80% 70%);
+    background-color: hsl(350 80% 60% / 0.22);
+    color: hsl(350 80% 72%);
   }
 
   /* ── Utility classes ───────────────────────────────────── */

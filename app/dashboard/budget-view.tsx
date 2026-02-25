@@ -9,6 +9,8 @@ import { Plus, Target, Pencil, Trash2, ArrowLeftRight, Copy, ChevronDown, Chevro
 import { AddCategoryModal } from '@/app/dashboard/add-category-modal'
 import { SetGoalModal } from '@/app/dashboard/set-goal-modal'
 import { MoveMoneyModal } from '@/app/dashboard/move-money-modal'
+import { MoveMoneyCategoryPopover } from '@/app/dashboard/move-money-popover'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { Category } from '@/app/dashboard/dashboard'
 import type { CategoryGoal } from '@/lib/budgeting'
 
@@ -97,6 +99,7 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
     const [goalModal, setGoalModal] = useState<{ categoryId: string; categoryName: string; goal: CategoryGoal | null } | null>(null)
     const [renamingCategory, setRenamingCategory] = useState<{ id: string; name: string } | null>(null)
     const [showMoveMoney, setShowMoveMoney] = useState(false)
+    const [openPopoverCategoryId, setOpenPopoverCategoryId] = useState<string | null>(null)
     const [copyingLastMonth, setCopyingLastMonth] = useState(false)
     const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
 
@@ -319,6 +322,12 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
         }
     }
 
+    const handlePopoverMoved = (updatedSummary: BudgetSummary) => {
+        cache.current.set(cacheKey(month, year), updatedSummary)
+        setBudgetSummary(updatedSummary)
+        setOpenPopoverCategoryId(null)
+    }
+
     const toggleGroup = (groupName: string) => {
         setCollapsedGroups(prev => {
             const next = new Set(prev)
@@ -364,8 +373,8 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
                                 <thead>
                                     <tr>
                                         <th className="w-2/5 pl-4">Category</th>
-                                        <th className="w-1/5 text-right">Budgeted</th>
-                                        <th className="w-1/5 text-right">Activity</th>
+                                        <th className="w-1/5 text-right">Assigned</th>
+                                        <th className="w-1/5 text-right">Outflow</th>
                                         <th className="w-1/5 text-right pr-4">Available</th>
                                         <th className="w-20"></th>
                                     </tr>
@@ -516,8 +525,8 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
                             <thead>
                                 <tr>
                                     <th className="w-2/5 pl-4">Category</th>
-                                    <th className="w-1/5 text-right">Budgeted</th>
-                                    <th className="w-1/5 text-right">Activity</th>
+                                    <th className="w-1/5 text-right">Assigned</th>
+                                    <th className="w-1/5 text-right">Outflow</th>
                                     <th className="w-1/5 text-right pr-4">Available</th>
                                     <th className="w-20"></th>
                                 </tr>
@@ -545,16 +554,14 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
                                                         <span>{groupName}</span>
                                                     </div>
                                                 </td>
-                                                <td className="text-right financial-figure text-muted-foreground text-xs">
+                                                <td className="text-right financial-figure text-muted-foreground text-xs font-bold">
                                                     {formatCurrency(groupBudgeted)}
                                                 </td>
-                                                <td className={`text-right financial-figure text-xs ${groupActivity < 0 ? 'text-destructive/70' : 'text-primary/70'}`}>
+                                                <td className="text-right financial-figure text-xs text-muted-foreground font-bold">
                                                     {formatCurrency(groupActivity)}
                                                 </td>
-                                                <td className="text-right pr-4 financial-figure text-xs">
-                                                    <span className={getAvailableClass(groupAvailable)}>
-                                                        {formatCurrency(groupAvailable)}
-                                                    </span>
+                                                <td className={`text-right pr-4 financial-figure text-xs font-bold ${groupAvailable < 0 ? 'text-destructive/80' : groupAvailable > 0 ? 'text-primary/80' : 'text-muted-foreground'}`}>
+                                                    {formatCurrency(groupAvailable)}
                                                 </td>
                                                 <td></td>
                                             </tr>
@@ -609,13 +616,40 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
                                                             </span>
                                                         )}
                                                     </td>
-                                                    <td className={`text-right text-sm financial-figure ${category.activity_amount < 0 ? 'amount-negative' : 'amount-positive'}`}>
+                                                    <td className="text-right text-sm financial-figure text-muted-foreground">
                                                         {formatCurrency(category.activity_amount)}
                                                     </td>
                                                     <td className="text-right pr-4">
-                                                        <span className={getAvailableClass(category.available_amount)}>
-                                                            {formatCurrency(category.available_amount)}
-                                                        </span>
+                                                        {category.available_amount !== 0 ? (
+                                                            <Popover
+                                                                open={openPopoverCategoryId === category.id}
+                                                                onOpenChange={(open) => setOpenPopoverCategoryId(open ? category.id : null)}
+                                                            >
+                                                                <PopoverTrigger asChild>
+                                                                    <span
+                                                                        className={`${getAvailableClass(category.available_amount)} cursor-pointer`}
+                                                                        title="Click to move money"
+                                                                    >
+                                                                        {formatCurrency(category.available_amount)}
+                                                                    </span>
+                                                                </PopoverTrigger>
+                                                                <PopoverContent side="left" align="center" className="w-80">
+                                                                    {openPopoverCategoryId === category.id && budgetSummary && (
+                                                                        <MoveMoneyCategoryPopover
+                                                                            budgetSummary={budgetSummary}
+                                                                            sourceCategoryId={category.id}
+                                                                            initialAmount={category.available_amount}
+                                                                            onMoved={handlePopoverMoved}
+                                                                            onClose={() => setOpenPopoverCategoryId(null)}
+                                                                        />
+                                                                    )}
+                                                                </PopoverContent>
+                                                            </Popover>
+                                                        ) : (
+                                                            <span className={getAvailableClass(category.available_amount)}>
+                                                                {formatCurrency(category.available_amount)}
+                                                            </span>
+                                                        )}
                                                     </td>
                                                     <td className="text-center">
                                                         <div className="flex items-center justify-center gap-0.5">
@@ -660,7 +694,7 @@ export function BudgetView({ month, year, onCategoryAdded, refreshKey }: BudgetV
                                     <td className="text-right text-sm financial-figure font-semibold text-foreground/70">
                                         {formatCurrency(totalBudgeted)}
                                     </td>
-                                    <td className={`text-right text-sm financial-figure font-semibold ${totalActivity < 0 ? 'text-destructive/80' : 'text-primary/80'}`}>
+                                    <td className="text-right text-sm financial-figure font-semibold text-muted-foreground">
                                         {formatCurrency(totalActivity)}
                                     </td>
                                     <td className="text-right pr-4">
