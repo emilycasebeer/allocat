@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useLayoutEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { Database } from '@/lib/database.types'
 
@@ -71,6 +71,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
     const [theme, setThemeState] = useState<Theme>('dark')
 
+    // Track the previous user to detect when user changes
+    const prevUserRef = useRef<any>(null)
+
     const setTheme = (newTheme: Theme) => {
         setThemeState(newTheme)
         localStorage.setItem('allocat-theme', newTheme)
@@ -93,14 +96,36 @@ export function Providers({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         // Verify the cached session against Supabase in the background.
         // If the token is expired, this will refresh it and update both user and accessToken.
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            setUser(session?.user ?? null)
-            setAccessToken(session?.access_token ?? null)
-        })
+        // If refresh fails (e.g., invalid refresh token), clear the session.
+        supabase.auth.getSession()
+            .then(({ data: { session }, error }) => {
+                if (error) {
+                    // Refresh token is invalid/missing — clear the session
+                    console.warn('Session refresh failed:', error.message)
+                    setUser(null)
+                    setAccessToken(null)
+                    supabase.auth.signOut().catch(() => { })
+                } else {
+                    setUser(session?.user ?? null)
+                    setAccessToken(session?.access_token ?? null)
+                }
+            })
+            .catch((error) => {
+                // Fallback error handling
+                console.error('Unexpected error during session verification:', error)
+                setUser(null)
+                setAccessToken(null)
+            })
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             (_event, session) => {
-                setUser(session?.user ?? null)
+                const newUser = session?.user ?? null
+                // If user has changed (logged out or switched user), clear user-specific localStorage
+                if (prevUserRef.current?.id !== newUser?.id) {
+                    localStorage.removeItem('allocat_wizard_dismissed')
+                }
+                prevUserRef.current = newUser
+                setUser(newUser)
                 setAccessToken(session?.access_token ?? null)
             }
         )
@@ -109,6 +134,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
     }, [])
 
     const signOut = async () => {
+        // Clear user-specific localStorage items before signing out
+        localStorage.removeItem('allocat_wizard_dismissed')
         await supabase.auth.signOut()
     }
 

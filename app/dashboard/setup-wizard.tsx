@@ -76,10 +76,10 @@ function StepDots({ current, total }: { current: number; total: number }) {
                 <div
                     key={i}
                     className={`h-2 rounded-full transition-all ${i === current
-                        ? 'w-6 bg-emerald-600'
+                        ? 'w-6 bg-primary'
                         : i < current
-                            ? 'w-2 bg-emerald-400'
-                            : 'w-2 bg-gray-300'
+                            ? 'w-2 bg-primary/70'
+                            : 'w-2 bg-muted'
                         }`}
                 />
             ))}
@@ -255,13 +255,13 @@ export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
     // ── Render ─────────────────────────────────────────────────────────────────
 
     return (
-        <div className="fixed inset-0 z-50 bg-gray-50 flex flex-col">
+        <div className="fixed inset-0 z-50 bg-background flex flex-col">
             {/* Header */}
-            <div className="flex items-center justify-between px-8 py-4 border-b bg-white">
-                <span className="text-lg font-semibold text-emerald-700">Allocat</span>
+            <div className="flex items-center justify-between px-8 py-4 border-b border-border bg-card">
+                <span className="text-lg font-semibold text-primary">Allocat</span>
                 <button
                     onClick={onSkip}
-                    className="text-sm text-gray-500 hover:text-gray-700 underline underline-offset-2"
+                    className="text-sm text-muted-foreground hover:text-foreground underline underline-offset-2"
                 >
                     Skip setup
                 </button>
@@ -274,12 +274,12 @@ export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
                     {/* ── Step 0: Welcome ── */}
                     {step === 0 && (
                         <div className="text-center space-y-6">
-                            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-100 mb-2">
-                                <CheckCircle className="w-8 h-8 text-emerald-600" />
+                            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-card border border-border mb-2">
+                                <CheckCircle className="w-8 h-8 text-primary" />
                             </div>
                             <div>
-                                <h1 className="text-3xl font-bold text-gray-900">Welcome to Allocat</h1>
-                                <p className="mt-3 text-gray-500 text-base">
+                                <h1 className="text-3xl font-bold text-foreground">Welcome to Allocat</h1>
+                                <p className="mt-3 text-muted-foreground text-base">
                                     Take a few minutes to connect your accounts and set up spending categories.
                                     You'll be ready to start budgeting right away.
                                 </p>
@@ -300,14 +300,14 @@ export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
                         <div className="space-y-6">
                             <div>
                                 <StepDots current={0} total={3} />
-                                <h2 className="mt-4 text-2xl font-bold text-gray-900">Add your accounts</h2>
-                                <p className="mt-1 text-gray-500 text-sm">
+                                <h2 className="mt-4 text-2xl font-bold text-foreground">Add your accounts</h2>
+                                <p className="mt-1 text-muted-foreground text-sm">
                                     Add your checking, savings, or credit card accounts to get started.
                                 </p>
                             </div>
 
                             {/* Form */}
-                            <div className="bg-white rounded-xl border p-5 space-y-4">
+                            <div className="bg-card rounded-lg border border-border p-5 space-y-4">
                                 <div className="grid grid-cols-2 gap-3">
                                     <div className="col-span-2 space-y-1">
                                         <Label htmlFor="acct-name">Account name</Label>
@@ -361,18 +361,18 @@ export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
                             {/* Added accounts list */}
                             {addedAccounts.length > 0 && (
                                 <div className="space-y-2">
-                                    <p className="text-sm font-medium text-gray-700">Added accounts</p>
+                                    <p className="text-sm font-medium text-foreground">Added accounts</p>
                                     {addedAccounts.map(a => (
                                         <div
                                             key={a.id}
-                                            className="flex items-center justify-between bg-white border rounded-lg px-4 py-3"
+                                            className="flex items-center justify-between bg-card border border-border rounded-lg px-4 py-3"
                                         >
                                             <div>
-                                                <span className="font-medium text-gray-800">{a.name}</span>
-                                                <span className="ml-2 text-xs text-gray-500">{a.type_name}</span>
+                                                <span className="font-medium text-foreground">{a.name}</span>
+                                                <span className="ml-2 text-xs text-muted-foreground">{a.type_name}</span>
                                             </div>
                                             <div className="flex items-center gap-3">
-                                                <span className="text-sm text-gray-600">
+                                                <span className="text-sm text-foreground">
                                                     ${a.balance.toFixed(2)}
                                                 </span>
                                                 <button
@@ -392,7 +392,7 @@ export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
                             <div className="flex items-center justify-between pt-2">
                                 <button
                                     onClick={() => setStep(2)}
-                                    className="text-sm text-gray-500 hover:text-gray-700 underline underline-offset-2"
+                                    className="text-sm text-muted-foreground hover:text-foreground underline underline-offset-2"
                                 >
                                     Skip this step
                                 </button>
@@ -408,17 +408,17 @@ export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
                         <div className="space-y-6">
                             <div>
                                 <StepDots current={1} total={3} />
-                                <h2 className="mt-4 text-2xl font-bold text-gray-900">Choose your categories</h2>
-                                <p className="mt-1 text-gray-500 text-sm">
+                                <h2 className="mt-4 text-2xl font-bold text-foreground">Choose your categories</h2>
+                                <p className="mt-1 text-muted-foreground text-sm">
                                     These are common spending categories. Uncheck any you don't need, or add your own.
                                 </p>
                             </div>
 
                             {/* Category list grouped */}
-                            <div className="bg-white rounded-xl border divide-y max-h-96 overflow-y-auto">
+                            <div className="bg-card rounded-lg border border-border divide-y divide-border max-h-96 overflow-y-auto">
                                 {Object.entries(groupedCategories).map(([group, cats]) => (
                                     <div key={group} className="px-4 py-3">
-                                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                                             {group}
                                         </p>
                                         <div className="space-y-1">
@@ -429,15 +429,15 @@ export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
                                                             type="checkbox"
                                                             checked={cat.checked}
                                                             onChange={() => toggleCategory(cat.key)}
-                                                            className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                                                            className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
                                                         />
-                                                        <span className={`text-sm ${cat.checked ? 'text-gray-800' : 'text-gray-400 line-through'}`}>
+                                                        <span className={`text-sm ${cat.checked ? 'text-foreground' : 'text-muted-foreground line-through'}`}>
                                                             {cat.name}
                                                         </span>
                                                     </label>
                                                     <button
                                                         onClick={() => removeCategory(cat.key)}
-                                                        className="text-gray-300 hover:text-red-400 ml-2"
+                                                        className="text-muted-foreground hover:text-destructive ml-2"
                                                         aria-label="Remove category"
                                                     >
                                                         <Trash2 className="w-3.5 h-3.5" />
@@ -450,8 +450,8 @@ export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
                             </div>
 
                             {/* Add custom category */}
-                            <div className="bg-white rounded-xl border p-4 space-y-3">
-                                <p className="text-sm font-medium text-gray-700">Add a custom category</p>
+                            <div className="bg-card rounded-lg border border-border p-4 space-y-3">
+                                <p className="text-sm font-medium text-foreground">Add a custom category</p>
                                 <div className="flex gap-2">
                                     <Input
                                         placeholder="Group"
@@ -481,7 +481,7 @@ export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
                             <div className="flex items-center justify-between pt-2">
                                 <button
                                     onClick={() => setStep(3)}
-                                    className="text-sm text-gray-500 hover:text-gray-700 underline underline-offset-2"
+                                    className="text-sm text-muted-foreground hover:text-foreground underline underline-offset-2"
                                 >
                                     Skip this step
                                 </button>
@@ -502,29 +502,29 @@ export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
                     {/* ── Step 3: All Done ── */}
                     {step === 3 && (
                         <div className="text-center space-y-6">
-                            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-100 mb-2">
-                                <CheckCircle className="w-8 h-8 text-emerald-600" />
+                            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-card border border-border mb-2">
+                                <CheckCircle className="w-8 h-8 text-primary" />
                             </div>
                             <div>
-                                <h2 className="text-3xl font-bold text-gray-900">You're all set!</h2>
-                                <p className="mt-3 text-gray-500 text-base">
+                                <h2 className="text-3xl font-bold text-foreground">You're all set!</h2>
+                                <p className="mt-3 text-muted-foreground text-base">
                                     Your budget is ready to go.
                                 </p>
                             </div>
 
                             {/* Summary */}
-                            <div className="bg-white rounded-xl border p-5 text-left space-y-3">
+                            <div className="bg-card rounded-lg border border-border p-5 text-left space-y-3">
                                 <div className="flex items-center gap-3">
-                                    <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0" />
-                                    <span className="text-sm text-gray-700">
+                                    <CheckCircle className="w-5 h-5 text-primary shrink-0" />
+                                    <span className="text-sm text-foreground">
                                         {addedAccounts.length === 0
                                             ? 'No accounts added'
                                             : `${addedAccounts.length} account${addedAccounts.length !== 1 ? 's' : ''} added`}
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-3">
-                                    <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0" />
-                                    <span className="text-sm text-gray-700">
+                                    <CheckCircle className="w-5 h-5 text-primary shrink-0" />
+                                    <span className="text-sm text-foreground">
                                         {createdCategoryCount === 0
                                             ? 'No categories created'
                                             : `${createdCategoryCount} categor${createdCategoryCount !== 1 ? 'ies' : 'y'} created`}
@@ -540,6 +540,6 @@ export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
 
                 </div>
             </div>
-        </div>
+        </div >
     )
 }

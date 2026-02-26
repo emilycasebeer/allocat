@@ -53,7 +53,8 @@ function fmt(amount: number) {
 }
 
 function AccountBalance({ account }: { account: Account }) {
-    const value = account.is_liability ? -Math.abs(account.balance) : account.balance
+    //const value = account.is_liability ? -Math.abs(account.balance) : account.balance
+    const value = account.balance
     const isNeg = value < 0
     return (
         <span
@@ -110,11 +111,10 @@ function AccountGroup({
                         return (
                             <button
                                 key={account.id}
-                                className={`w-full flex items-center justify-between gap-2 pl-6 pr-2 py-1.5 rounded-md transition-colors ${
-                                    isActive
+                                className={`w-full flex items-center justify-between gap-2 pl-6 pr-2 py-1.5 rounded-md transition-colors ${isActive
                                         ? 'bg-primary/15 text-primary'
                                         : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
-                                }`}
+                                    }`}
                                 onClick={() => onAccountSelect(account)}
                             >
                                 <span className="text-sm truncate text-left">{account.name}</span>
@@ -147,9 +147,9 @@ export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountA
     const { cash, credit, tracking, closed } = groupAccounts(accounts)
 
     const topNav = [
-        { id: 'budget',    label: 'Budget',     Icon: LayoutList   },
-        { id: 'reports',   label: 'Reports',    Icon: BarChart3    },
-        { id: 'scheduled', label: 'Scheduled',  Icon: CalendarClock },
+        { id: 'budget', label: 'Budget', Icon: LayoutList },
+        { id: 'reports', label: 'Reports', Icon: BarChart3 },
+        { id: 'scheduled', label: 'Scheduled', Icon: CalendarClock },
     ] as const
 
     const isAllAccounts = currentView === 'transactions' && selectedAccount === null
@@ -175,11 +175,10 @@ export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountA
                         <button
                             key={id}
                             onClick={() => onViewChange(id)}
-                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                                currentView === id
+                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${currentView === id
                                     ? 'bg-primary/15 text-primary'
                                     : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
-                            }`}
+                                }`}
                         >
                             <Icon className="h-4 w-4 flex-shrink-0" />
                             {label}
@@ -187,11 +186,10 @@ export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountA
                     ))}
                     <button
                         onClick={() => onViewChange('transactions')}
-                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                            isAllAccounts
+                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${isAllAccounts
                                 ? 'bg-primary/15 text-primary'
                                 : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
-                        }`}
+                            }`}
                     >
                         <Landmark className="h-4 w-4 flex-shrink-0" />
                         All Accounts
