@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import { createAuthenticatedSupabaseClient } from '@/lib/supabase'
+import type { QueryData } from '@supabase/supabase-js'
 
 const createErrorResponse = (message: string, status: number) =>
     NextResponse.json({ error: message }, { status })
 
+/* ================================
+   GET /api/transactions
+================================ */
 export async function GET(request: NextRequest) {
     try {
         const user = await requireAuth(request)
@@ -16,31 +20,31 @@ export async function GET(request: NextRequest) {
         const startDate = searchParams.get('start_date')
         const endDate = searchParams.get('end_date')
 
-        let query = supabase
+        const query = supabase
             .from('transactions')
             .select(`
-                *,
-                accounts!inner(user_id, name),
-                categories(
-                    name,
-                    category_groups(name)
-                ),
-                payees(name),
-                splits:transactions!parent_transaction_id(
-                    id, amount, memo, category_id,
-                    categories(name, category_groups(name))
-                ),
-                transfer_tx:transactions!transfer_transaction_id(account_id)
-            `)
+        *,
+        accounts!inner(user_id, name),
+        categories(
+          name,
+          category_groups(name)
+        ),
+        payees(name),
+        splits:transactions!parent_transaction_id(
+          id, amount, memo, category_id,
+          categories(name, category_groups(name))
+        ),
+        transfer_tx:transactions!transfer_transaction_id(account_id)
+      `)
             .eq('accounts.user_id', user.id)
             .is('parent_transaction_id', null)
 
-        if (accountId) query = query.eq('account_id', accountId)
-        if (categoryId) query = query.eq('category_id', categoryId)
-        if (startDate) query = query.gte('date', startDate)
-        if (endDate) query = query.lte('date', endDate)
+        if (accountId) query.eq('account_id', accountId)
+        if (categoryId) query.eq('category_id', categoryId)
+        if (startDate) query.gte('date', startDate)
+        if (endDate) query.lte('date', endDate)
 
-        const { data: transactions, error } = await query
+        const { data, error } = await query
             .order('date', { ascending: false })
             .order('created_at', { ascending: false })
 
@@ -48,15 +52,20 @@ export async function GET(request: NextRequest) {
             return createErrorResponse(error.message, 500)
         }
 
-        const result = (transactions ?? []).map((t) => {
-            const cat = t.categories as any
-            const payee = t.payees as any
-            const rawTransferTx = t.transfer_tx
-            const transferTx = Array.isArray(rawTransferTx)
-                ? (rawTransferTx as any[])[0]
-                : rawTransferTx as any
-            const rawSplits = (t.splits as any[]) ?? []
-            const splits = rawSplits.map((s) => ({
+        type TransactionsResult = QueryData<typeof query>
+
+        const transactions: TransactionsResult = data ?? []
+
+        const result = transactions.map((t) => {
+            const transferTx = t.transfer_tx ?? null
+
+            const splitsRaw = Array.isArray(t.splits)
+                ? t.splits
+                : t.splits
+                    ? [t.splits]
+                    : []
+
+            const splits = splitsRaw.map((s) => ({
                 id: s.id,
                 amount: s.amount,
                 memo: s.memo,
@@ -64,11 +73,12 @@ export async function GET(request: NextRequest) {
                 category_name: s.categories?.name ?? null,
                 group_name: s.categories?.category_groups?.name ?? null,
             }))
+
             return {
                 ...t,
-                category_name: cat?.name ?? null,
-                group_name: cat?.category_groups?.name ?? null,
-                payee_name: payee?.name ?? null,
+                category_name: t.categories?.name ?? null,
+                group_name: t.categories?.category_groups?.name ?? null,
+                payee_name: t.payees?.name ?? null,
                 to_account_id: transferTx?.account_id ?? null,
                 splits,
             }
@@ -83,23 +93,42 @@ export async function GET(request: NextRequest) {
     }
 }
 
+/* ================================
+   POST /api/transactions
+================================ */
 export async function POST(request: NextRequest) {
     try {
         const user = await requireAuth(request)
         const supabase = createAuthenticatedSupabaseClient(user.accessToken)
         const body = await request.json()
 
-        const { account_id, category_id, amount, date, memo, type, payee_name, splits, to_account_id } = body
+        const {
+            account_id,
+            category_id,
+            amount,
+            date,
+            memo,
+            type,
+            payee_name,
+            splits,
+            to_account_id,
+        } = body
 
         if (!account_id || amount === undefined || !date || !type) {
-            return createErrorResponse('account_id, amount, date, and type are required', 400)
+            return createErrorResponse(
+                'account_id, amount, date, and type are required',
+                400
+            )
         }
 
         if (type === 'transfer' && !to_account_id) {
-            return createErrorResponse('to_account_id is required for transfer transactions', 400)
+            return createErrorResponse(
+                'to_account_id is required for transfer transactions',
+                400
+            )
         }
 
-        // Verify account belongs to user
+        /* ---------- Verify account ---------- */
         const { data: account, error: accountError } = await supabase
             .from('accounts')
             .select('id')
@@ -111,7 +140,7 @@ export async function POST(request: NextRequest) {
             return createErrorResponse('Account not found', 404)
         }
 
-        // Verify category belongs to user (if provided and not a split)
+        /* ---------- Verify category ---------- */
         if (category_id && !splits) {
             const { data: category, error: categoryError } = await supabase
                 .from('categories')
@@ -125,10 +154,12 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Resolve payee: find or create by name
+        /* ---------- Resolve payee ---------- */
         let payee_id: string | null = null
-        if (payee_name && payee_name.trim()) {
+
+        if (payee_name?.trim()) {
             const trimmedName = payee_name.trim()
+
             const { data: existingPayee } = await supabase
                 .from('payees')
                 .select('id')
@@ -144,28 +175,32 @@ export async function POST(request: NextRequest) {
                     .insert({ user_id: user.id, name: trimmedName })
                     .select('id')
                     .single()
+
                 payee_id = newPayee?.id ?? null
             }
         }
 
-        // Auto-update payee's default category (fire-and-forget)
+        /* ---------- Auto-update payee default category ---------- */
         if (payee_id && category_id) {
-            supabase
+            const { error } = await supabase
                 .from('payees')
                 .update({ default_category_id: category_id })
                 .eq('id', payee_id)
                 .eq('user_id', user.id)
-                .then(() => {})
-                .catch(() => {})
+
+            if (error) {
+                console.error('Failed to update payee default category:', error)
+            }
         }
 
         const isSplit = Array.isArray(splits) && splits.length > 0
 
+        /* ---------- Insert parent transaction ---------- */
         const { data: transaction, error } = await supabase
             .from('transactions')
             .insert({
                 account_id,
-                category_id: isSplit ? null : (category_id ?? null),
+                category_id: isSplit ? null : category_id ?? null,
                 payee_id,
                 amount: parseFloat(amount),
                 date,
@@ -179,44 +214,47 @@ export async function POST(request: NextRequest) {
             .select()
             .single()
 
-        if (error) {
-            return createErrorResponse(error.message, 500)
+        if (error || !transaction) {
+            return createErrorResponse(error?.message ?? 'Insert failed', 500)
         }
 
-        // Insert split children
+        /* ---------- Insert split children ---------- */
         if (isSplit) {
-            const children = splits.map((s: { category_id: string | null; amount: number; memo?: string }) => ({
-                account_id,
-                parent_transaction_id: transaction.id,
-                category_id: s.category_id ?? null,
-                amount: s.amount,
-                memo: s.memo ?? null,
-                date,
-                type,
-                cleared: 'uncleared',
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-            }))
+            const children = splits.map(
+                (s: { category_id: string | null; amount: number; memo?: string }) => ({
+                    account_id,
+                    parent_transaction_id: transaction.id,
+                    category_id: s.category_id ?? null,
+                    amount: s.amount,
+                    memo: s.memo ?? null,
+                    date,
+                    type,
+                    cleared: 'uncleared',
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                })
+            )
 
-            const { error: splitError } = await supabase.from('transactions').insert(children)
+            const { error: splitError } = await supabase
+                .from('transactions')
+                .insert(children)
+
             if (splitError) {
-                // Roll back parent if children fail
                 await supabase.from('transactions').delete().eq('id', transaction.id)
                 return createErrorResponse(splitError.message, 500)
             }
         }
 
-        // Create the paired leg for transfers and link both sides
+        /* ---------- Transfer logic ---------- */
         if (type === 'transfer' && to_account_id) {
-            // Verify destination account belongs to this user
-            const { data: toAccount, error: toAccountError } = await supabase
+            const { data: toAccount } = await supabase
                 .from('accounts')
                 .select('id')
                 .eq('id', to_account_id)
                 .eq('user_id', user.id)
                 .single()
 
-            if (toAccountError || !toAccount) {
+            if (!toAccount) {
                 await supabase.from('transactions').delete().eq('id', transaction.id)
                 return createErrorResponse('Destination account not found', 404)
             }
@@ -225,7 +263,7 @@ export async function POST(request: NextRequest) {
                 .from('transactions')
                 .insert({
                     account_id: to_account_id,
-                    amount: -parseFloat(amount), // opposite sign: money arrives at destination
+                    amount: -parseFloat(amount),
                     date,
                     memo: memo ?? null,
                     type: 'transfer',
@@ -238,14 +276,17 @@ export async function POST(request: NextRequest) {
 
             if (pairError || !pairedTx) {
                 await supabase.from('transactions').delete().eq('id', transaction.id)
-                return createErrorResponse('Failed to create paired transfer transaction', 500)
+                return createErrorResponse(
+                    'Failed to create paired transfer transaction',
+                    500
+                )
             }
 
-            // Link both legs to each other
             await supabase
                 .from('transactions')
                 .update({ transfer_transaction_id: pairedTx.id })
                 .eq('id', transaction.id)
+
             await supabase
                 .from('transactions')
                 .update({ transfer_transaction_id: transaction.id })
