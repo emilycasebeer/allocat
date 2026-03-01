@@ -178,7 +178,7 @@ export async function POST(request: NextRequest) {
                     .upsert(
                         allBudgets.map(b => ({
                             budget_id: b.id,
-                            category_id: paymentCategoryId,
+                            category_id: paymentCategoryId!,
                             budgeted_amount: 0,
                             created_at: new Date().toISOString(),
                             updated_at: new Date().toISOString(),

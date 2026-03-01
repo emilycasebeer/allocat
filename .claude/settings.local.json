@@ -9,7 +9,8 @@
       "Bash(head:*)",
       "Bash(grep:*)",
       "Bash(tail:*)",
-      "Bash(cd * && npx tsc --noEmit*)"
+      "Bash(cd * && npx tsc --noEmit*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }
