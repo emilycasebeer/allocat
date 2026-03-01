@@ -24,6 +24,7 @@ export interface Account {
     is_closed: boolean
     balance: number
     payment_category_id: string | null
+    note?: string | null
 }
 
 export interface Category {
@@ -93,8 +94,9 @@ export function Dashboard() {
             if (response.ok) {
                 const { accounts } = await response.json()
                 setAccounts(accounts)
-                if (accounts.length > 0 && !selectedAccount) {
-                    setSelectedAccount(accounts[0])
+                if (!selectedAccount) {
+                    const firstOpen = accounts.find((a: Account) => !a.is_closed)
+                    if (firstOpen) setSelectedAccount(firstOpen)
                 }
                 return accounts
             }
@@ -212,6 +214,18 @@ export function Dashboard() {
                         fetchAccounts()
                         setBudgetRefreshKey(k => k + 1)
                     }}
+                    onAccountMutated={() => {
+                        fetchAccounts()
+                        setBudgetRefreshKey(k => k + 1)
+                    }}
+                    onAccountDeleted={(id) => {
+                        if (selectedAccount?.id === id) {
+                            setSelectedAccount(null)
+                            setCurrentView('budget')
+                        }
+                        fetchAccounts()
+                        setBudgetRefreshKey(k => k + 1)
+                    }}
                     currentView={currentView}
                     onViewChange={(view) => {
                         setSelectedAccount(null)
@@ -290,6 +304,18 @@ export function Dashboard() {
                                 accounts={accounts}
                                 categories={categories}
                                 onBalanceDelta={handleBalanceDelta}
+                                onAccountMutated={() => {
+                                    fetchAccounts()
+                                    setBudgetRefreshKey(k => k + 1)
+                                }}
+                                onAccountDeleted={(id) => {
+                                    if (selectedAccount?.id === id) {
+                                        setSelectedAccount(null)
+                                        setCurrentView('budget')
+                                    }
+                                    fetchAccounts()
+                                    setBudgetRefreshKey(k => k + 1)
+                                }}
                                 currentMonth={currentMonth.month}
                                 currentYear={currentMonth.year}
                             />

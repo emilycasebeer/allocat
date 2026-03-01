@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Plus, LayoutList, BarChart3, Landmark, ChevronDown, ChevronRight, CalendarClock, Users, LogOut, User } from 'lucide-react'
+import { Plus, LayoutList, BarChart3, Landmark, ChevronDown, ChevronRight, CalendarClock, Users, LogOut, User, Pencil } from 'lucide-react'
 import { AddAccountModal } from '@/app/dashboard/add-account-modal'
+import { EditAccountModal } from '@/app/dashboard/edit-account-modal'
 import { SettingsModal } from '@/app/dashboard/settings-modal'
 import type { Account } from '@/app/dashboard/dashboard'
 import Decimal from 'decimal.js'
@@ -22,6 +23,8 @@ interface SidebarProps {
     selectedAccount: Account | null
     onAccountSelect: (account: Account) => void
     onAccountAdded: () => void
+    onAccountMutated: () => void
+    onAccountDeleted: (id: string) => void
     currentView: string
     onViewChange: (view: string) => void
     onManagePayees: () => void
@@ -71,12 +74,14 @@ function AccountGroup({
     accounts,
     selectedAccount,
     onAccountSelect,
+    onEditAccount,
     defaultCollapsed = false,
 }: {
     label: string
     accounts: Account[]
     selectedAccount: Account | null
     onAccountSelect: (a: Account) => void
+    onEditAccount: (account: Account) => void
     defaultCollapsed?: boolean
 }) {
     const [collapsed, setCollapsed] = useState(defaultCollapsed)
@@ -109,17 +114,26 @@ function AccountGroup({
                     {accounts.map(account => {
                         const isActive = selectedAccount?.id === account.id
                         return (
-                            <button
-                                key={account.id}
-                                className={`w-full flex items-center justify-between gap-2 pl-6 pr-2 py-1.5 rounded-md transition-colors ${isActive
-                                        ? 'bg-primary/15 text-primary'
-                                        : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
-                                    }`}
-                                onClick={() => onAccountSelect(account)}
-                            >
-                                <span className="text-sm truncate text-left">{account.name}</span>
-                                <AccountBalance account={account} />
-                            </button>
+                            <div key={account.id} className="relative group">
+                                {/* Pencil edit icon — left of the account name, visible on hover */}
+                                <button
+                                    className="absolute left-1 top-1/2 -translate-y-1/2 h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity z-10"
+                                    onClick={e => { e.stopPropagation(); onEditAccount(account) }}
+                                    aria-label={`Edit ${account.name}`}
+                                >
+                                    <Pencil className="h-3 w-3" />
+                                </button>
+                                <button
+                                    className={`w-full flex items-center justify-between gap-2 pl-7 pr-2 py-1.5 rounded-md transition-colors ${isActive
+                                            ? 'bg-primary/15 text-primary'
+                                            : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                                        }`}
+                                    onClick={() => onAccountSelect(account)}
+                                >
+                                    <span className="text-sm truncate text-left">{account.name}</span>
+                                    <AccountBalance account={account} />
+                                </button>
+                            </div>
                         )
                     })}
                 </div>
@@ -128,11 +142,12 @@ function AccountGroup({
     )
 }
 
-export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountAdded, currentView, onViewChange, onManagePayees }: SidebarProps) {
+export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountAdded, onAccountMutated, onAccountDeleted, currentView, onViewChange, onManagePayees }: SidebarProps) {
     const [showAddAccount, setShowAddAccount] = useState(false)
     const [showSettings, setShowSettings] = useState(false)
     const { user, signOut } = useAuth()
     const [displayName, setDisplayName] = useState<string | null>(null)
+    const [editingAccount, setEditingAccount] = useState<Account | null>(null)
 
     useEffect(() => {
         if (!user) return
@@ -212,10 +227,10 @@ export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountA
                     </p>
                 ) : (
                     <div className="space-y-1">
-                        <AccountGroup label="Cash" accounts={cash} selectedAccount={selectedAccount} onAccountSelect={onAccountSelect} />
-                        <AccountGroup label="Credit Cards" accounts={credit} selectedAccount={selectedAccount} onAccountSelect={onAccountSelect} />
-                        <AccountGroup label="Tracking" accounts={tracking} selectedAccount={selectedAccount} onAccountSelect={onAccountSelect} />
-                        <AccountGroup label="Closed" accounts={closed} selectedAccount={selectedAccount} onAccountSelect={onAccountSelect} defaultCollapsed />
+                        <AccountGroup label="Cash" accounts={cash} selectedAccount={selectedAccount} onAccountSelect={onAccountSelect} onEditAccount={setEditingAccount} />
+                        <AccountGroup label="Credit Cards" accounts={credit} selectedAccount={selectedAccount} onAccountSelect={onAccountSelect} onEditAccount={setEditingAccount} />
+                        <AccountGroup label="Tracking" accounts={tracking} selectedAccount={selectedAccount} onAccountSelect={onAccountSelect} onEditAccount={setEditingAccount} />
+                        <AccountGroup label="Closed" accounts={closed} selectedAccount={selectedAccount} onAccountSelect={onAccountSelect} onEditAccount={setEditingAccount} defaultCollapsed />
                     </div>
                 )}
 
@@ -289,6 +304,16 @@ export function Sidebar({ accounts, selectedAccount, onAccountSelect, onAccountA
                 onOpenChange={setShowSettings}
                 onNameChange={(name) => setDisplayName(name || null)}
             />
+
+            {editingAccount && (
+                <EditAccountModal
+                    open={!!editingAccount}
+                    onOpenChange={(open) => { if (!open) setEditingAccount(null) }}
+                    account={editingAccount}
+                    onAccountMutated={() => { setEditingAccount(null); onAccountMutated() }}
+                    onAccountDeleted={(id) => { setEditingAccount(null); onAccountDeleted(id) }}
+                />
+            )}
         </div>
     )
 }

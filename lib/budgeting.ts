@@ -338,6 +338,7 @@ export class BudgetingEngine {
                     categories!inner(
                         name,
                         is_system,
+                        is_hidden,
                         category_groups!inner(name, sort_order),
                         category_goals(
                             id, goal_type, target_amount, target_date, monthly_amount
@@ -538,6 +539,8 @@ export class BudgetingEngine {
 
         for (const alloc of currentAllocations) {
             const cat = alloc.categories as any
+            // Skip hidden categories (e.g. payment categories for closed CC accounts)
+            if (cat.is_hidden) continue
             const ccAccountId = ccPaymentMap.get(alloc.category_id)
             const carryNegative = ccAccountId !== undefined
 

@@ -18,7 +18,6 @@ export async function GET(request: NextRequest) {
                 account_types!inner(name, is_liability, is_budget_account)
             `)
             .eq('user_id', user.id)
-            .eq('is_closed', false)
             .order('sort_order')
             .order('name')
 

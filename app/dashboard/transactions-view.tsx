@@ -11,6 +11,7 @@ import {
 import { AddTransactionModal } from '@/app/dashboard/add-transaction-modal'
 import type { EditingTransaction, TransactionMutationInfo } from '@/app/dashboard/add-transaction-modal'
 import { ReconcileModal } from '@/app/dashboard/reconcile-modal'
+import { EditAccountModal } from '@/app/dashboard/edit-account-modal'
 import type { Account, Category } from '@/app/dashboard/dashboard'
 
 interface SplitRow {
@@ -51,6 +52,8 @@ interface TransactionsViewProps {
     categories: Category[]
     /** Called after any mutation so Dashboard can update balances without a server round-trip */
     onBalanceDelta: (deltas: BalanceDelta[]) => void
+    onAccountMutated?: () => void
+    onAccountDeleted?: (id: string) => void
     currentMonth?: number
     currentYear?: number
 }
@@ -101,13 +104,14 @@ const formatBalance = (amount: number) => {
 }
 
 export function TransactionsView({
-    account, accounts, categories, onBalanceDelta, currentMonth, currentYear
+    account, accounts, categories, onBalanceDelta, onAccountMutated, onAccountDeleted, currentMonth, currentYear
 }: TransactionsViewProps) {
     const [transactions, setTransactions] = useState<Transaction[]>([])
     const [loading, setLoading] = useState(false)
     const [showAddTransaction, setShowAddTransaction] = useState(false)
     const [editing, setEditing] = useState<EditingTransaction | null>(null)
     const [showReconcile, setShowReconcile] = useState(false)
+    const [showEditAccount, setShowEditAccount] = useState(false)
     const [expandedSplits, setExpandedSplits] = useState<Set<string>>(new Set())
     const [filterType, setFilterType] = useState<'all' | 'income' | 'expense' | 'transfer'>('all')
     const [searchText, setSearchText] = useState('')
@@ -403,6 +407,15 @@ export function TransactionsView({
                         <p className="text-sm text-muted-foreground mt-0.5">{account.type_name}</p>
                     </div>
                     <div className="flex items-center gap-2">
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setShowEditAccount(true)}
+                            className="h-8 w-8 p-0"
+                            aria-label="Edit account"
+                        >
+                            <Pencil className="h-3.5 w-3.5" />
+                        </Button>
                         <Button
                             size="sm"
                             onClick={() => setShowReconcile(true)}
@@ -736,6 +749,22 @@ export function TransactionsView({
                         fetchTransactions(false)
                     }}
                     initialClearedBalance={clearedBalance}
+                />
+            )}
+
+            {account && showEditAccount && (
+                <EditAccountModal
+                    open={showEditAccount}
+                    onOpenChange={setShowEditAccount}
+                    account={account}
+                    onAccountMutated={() => {
+                        setShowEditAccount(false)
+                        onAccountMutated?.()
+                    }}
+                    onAccountDeleted={(id) => {
+                        setShowEditAccount(false)
+                        onAccountDeleted?.(id)
+                    }}
                 />
             )}
         </div>

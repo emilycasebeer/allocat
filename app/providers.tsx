@@ -10,18 +10,24 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey)
 
 /**
- * Read the cached Supabase user from localStorage synchronously.
+ * Read the cached Supabase session from localStorage synchronously.
  * Supabase stores the session under a key matching `sb-*-auth-token`.
  * Returns null if there is no cached session or if called server-side.
+ * `isExpired` is true if the access token's `expires_at` has passed —
+ * in that case we should NOT skip the loading state, because getSession()
+ * may be able to refresh the token and produce a valid session.
  */
-function getStoredUser(): any {
+function getStoredSession(): { user: any; isExpired: boolean } | null {
     if (typeof window === 'undefined') return null
     try {
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i)
             if (key?.startsWith('sb-') && key?.endsWith('-auth-token')) {
                 const stored = JSON.parse(localStorage.getItem(key) ?? 'null')
-                return stored?.user ?? null
+                if (!stored?.user) return null
+                // expires_at is a Unix timestamp in seconds
+                const isExpired = !stored.expires_at || stored.expires_at * 1000 < Date.now()
+                return { user: stored.user, isExpired }
             }
         }
     } catch {
@@ -81,11 +87,19 @@ export function Providers({ children }: { children: React.ReactNode }) {
         document.documentElement.classList.toggle('light', newTheme === 'light')
     }
 
-    // Runs synchronously before the first browser paint — reads localStorage and
-    // resolves auth state instantly for returning users, eliminating the spinner.
+    // Runs synchronously before the first browser paint.
+    // For a valid non-expired session: resolve loading immediately so returning users
+    // see their dashboard without a spinner.
+    // For no session: resolve loading immediately so logged-out users see LoginPage without a spinner.
+    // For an expired session: leave loading=true so getSession() can attempt a token refresh
+    // before deciding what to show — this prevents a flash of Dashboard followed by LoginPage.
     useLayoutEffect(() => {
-        setUser(getStoredUser())
-        setLoading(false)
+        const session = getStoredSession()
+        if (!session || !session.isExpired) {
+            setUser(session?.user ?? null)
+            setLoading(false)
+        }
+        // If session exists but is expired, leave loading=true; getSession() handles it below.
         const saved = localStorage.getItem('allocat-theme') as Theme | null
         const resolved = saved ?? 'dark'
         setThemeState(resolved)
@@ -109,12 +123,16 @@ export function Providers({ children }: { children: React.ReactNode }) {
                     setUser(session?.user ?? null)
                     setAccessToken(session?.access_token ?? null)
                 }
+                // Always resolve loading here — covers the expired-token path where
+                // useLayoutEffect left loading=true waiting for this result.
+                setLoading(false)
             })
             .catch((error) => {
                 // Fallback error handling
                 console.error('Unexpected error during session verification:', error)
                 setUser(null)
                 setAccessToken(null)
+                setLoading(false)
             })
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
