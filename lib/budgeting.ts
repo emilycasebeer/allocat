@@ -338,7 +338,7 @@ export class BudgetingEngine {
                     categories!inner(
                         name,
                         is_system,
-                        category_groups!inner(name),
+                        category_groups!inner(name, sort_order),
                         category_goals(
                             id, goal_type, target_amount, target_date, monthly_amount
                         )
@@ -360,11 +360,11 @@ export class BudgetingEngine {
             allAccountIds.length > 0
                 ? this.supabase
                     .from('transactions')
-                    .select('account_id, category_id, amount, date, type, parent_transaction_id')
+                    .select('account_id, category_id, amount, date, type, parent_transaction_id, is_split')
                     .in('account_id', allAccountIds)
                     .gte('date', startOfRange)
                     .lte('date', endOfCurrentMonth)
-                : Promise.resolve({ data: [] as { account_id: string; category_id: string | null; amount: number; date: string; type: string; parent_transaction_id: string | null }[], error: null }),
+                : Promise.resolve({ data: [] as { account_id: string; category_id: string | null; amount: number; date: string; type: string; parent_transaction_id: string | null; is_split: boolean }[], error: null }),
 
             // All-time income from budget accounts (unbounded — required for correct TBB)
             budgetAccountIds.length > 0
@@ -401,7 +401,7 @@ export class BudgetingEngine {
 
         // txByAccount: Map<accountId, tx[]>
         // Used by CC activity computation to iterate only the relevant account's transactions
-        type TxRow = { category_id: string | null; amount: number; date: string; type: string; parent_transaction_id: string | null }
+        type TxRow = { category_id: string | null; amount: number; date: string; type: string; parent_transaction_id: string | null; is_split: boolean }
         const txByAccount = new Map<string, TxRow[]>()
 
         for (const tx of transactions) {
@@ -436,11 +436,15 @@ export class BudgetingEngine {
             return total.toNumber()
         }
 
-        // Walk 24 months forward to compute rolling available balance
+        // Walk 24 months forward to compute rolling available balance.
+        // For CC payment categories, pass ccAccountId to fold per-month CC activity
+        // (charges, payments, starting balance) directly into the historical walk so that
+        // uncovered charges from prior months carry forward correctly.
         const computeAvailableFn = (
             categoryId: string,
             carryNegative: boolean,
-            excludeAccountId?: string
+            excludeAccountId?: string,
+            ccAccountId?: string
         ): number => {
             const catBudgets = allAllocMap.get(categoryId)
             let available = new Decimal(0)
@@ -454,19 +458,30 @@ export class BudgetingEngine {
 
                 const budgeted = new Decimal(catBudgets?.get(budgetId) ?? 0)
                 const activity = new Decimal(getActivity(categoryId, mo, yr, excludeAccountId))
+                const ccActivity = ccAccountId
+                    ? new Decimal(getCCActivityForMonth(ccAccountId, categoryId, mo, yr))
+                    : new Decimal(0)
                 const rollover = (carryNegative || available.isPositive()) ? available : new Decimal(0)
-                available = rollover.plus(budgeted).plus(activity)
+                available = rollover.plus(budgeted).plus(activity).plus(ccActivity)
             }
 
             return available.toNumber()
         }
 
-        // Net CC activity for a payment category: categorized charges minus payments
-        // Expenses are stored as negative amounts; payments (transfers to CC) as positive
-        const getCCActivityFn = (accountId: string, paymentCategoryId?: string): number => {
+        // Net CC activity for a payment category for a specific month.
+        //
+        // The return value is added to the CC payment category's available amount:
+        //   positive return → available goes UP (money moved into the CC payment pot)
+        //   negative return → available goes DOWN (unfunded debt or money paid out)
+        //
+        // Categorized expense (charge): money "moved" from spending category to CC payment pot → positive
+        // Uncategorized non-split expense (e.g. starting balance debt): unfunded debt → negative
+        // Uncategorized income on CC (e.g. starting balance credit): card owes you money → positive
+        // Transfer into CC (payment): money left the CC payment pot → negative
+        const getCCActivityForMonth = (accountId: string, paymentCategoryId: string | undefined, mo: number, yr: number): number => {
             const accountTxs = txByAccount.get(accountId) ?? []
-            const moStr = String(month).padStart(2, '0')
-            const yrStr = String(year)
+            const moStr = String(mo).padStart(2, '0')
+            const yrStr = String(yr)
 
             let charges = new Decimal(0)
             let payments = new Decimal(0)
@@ -474,10 +489,24 @@ export class BudgetingEngine {
             for (const tx of accountTxs) {
                 if (tx.date.substring(0, 4) !== yrStr || tx.date.substring(5, 7) !== moStr) continue
 
-                if (tx.type === 'expense' && tx.category_id && tx.category_id !== paymentCategoryId) {
-                    // Expenses are negative; negate to accumulate as positive charges
-                    charges = charges.minus(tx.amount)
+                if (tx.type === 'expense') {
+                    if (tx.category_id && tx.category_id !== paymentCategoryId) {
+                        // Categorized charge: money "moves" from spending category to CC payment pot
+                        // Expenses stored as negative; negate to get positive charge amount
+                        charges = charges.minus(tx.amount)
+                    } else if (!tx.category_id && !tx.is_split && !tx.parent_transaction_id) {
+                        // Uncategorized non-split expense (e.g. starting balance debt): unfunded debt
+                        // Treat as negative payment: reduces available (you owe this, nothing covers it)
+                        payments = payments.minus(tx.amount) // amount is negative; minus negative = adds to payments
+                    }
+                    // Split parents (category_id=null, is_split=true) are intentionally skipped —
+                    // their split children carry the category and are counted above
+                } else if (tx.type === 'income' && !tx.category_id && !tx.parent_transaction_id) {
+                    // Uncategorized income on CC (e.g. starting balance credit: card owes you money)
+                    // Positive income amount adds directly to charges → increases available
+                    charges = charges.plus(tx.amount)
                 } else if (tx.type === 'transfer' && Number(tx.amount) > 0 && !tx.parent_transaction_id) {
+                    // Transfer into CC (a payment): money leaves the CC payment pot
                     payments = payments.plus(tx.amount)
                 }
             }
@@ -505,6 +534,7 @@ export class BudgetingEngine {
         // ── Build category rows (synchronous — no DB calls) ───────────────────────
 
         const categories: BudgetCategoryRow[] = []
+        const groupSortOrder = new Map<string, number>()
 
         for (const alloc of currentAllocations) {
             const cat = alloc.categories as any
@@ -512,19 +542,21 @@ export class BudgetingEngine {
             const carryNegative = ccAccountId !== undefined
 
             const activity = getActivity(alloc.category_id, month, year, ccAccountId)
-            let available = computeAvailableFn(alloc.category_id, carryNegative, ccAccountId)
-
-            if (ccAccountId) {
-                const ccActivity = getCCActivityFn(ccAccountId, alloc.category_id)
-                available = new Decimal(available).plus(ccActivity).toNumber()
-            }
+            // For CC payment categories, ccAccountId is passed so getCCActivityForMonth is
+            // called per-month inside the walk — no separate post-walk adjustment needed
+            const available = computeAvailableFn(alloc.category_id, carryNegative, ccAccountId, ccAccountId)
 
             const goalRow = Array.isArray(cat.category_goals) ? cat.category_goals[0] : cat.category_goals
+
+            const groupName: string = cat.category_groups.name
+            if (!groupSortOrder.has(groupName)) {
+                groupSortOrder.set(groupName, cat.category_groups.sort_order ?? 0)
+            }
 
             categories.push({
                 id: alloc.category_id,
                 name: cat.name,
-                group_name: cat.category_groups.name,
+                group_name: groupName,
                 is_system: cat.is_system ?? false,
                 budgeted_amount: alloc.budgeted_amount,
                 activity_amount: activity,
@@ -532,6 +564,14 @@ export class BudgetingEngine {
                 goal: goalRow ?? null,
             })
         }
+
+        // Sort by group sort_order so CC Payments (sort_order=9999) sinks to the bottom
+        categories.sort((a, b) => {
+            const sortA = groupSortOrder.get(a.group_name) ?? 0
+            const sortB = groupSortOrder.get(b.group_name) ?? 0
+            if (sortA !== sortB) return sortA - sortB
+            return a.group_name.localeCompare(b.group_name)
+        })
 
         return {
             id: currentBudget.id,

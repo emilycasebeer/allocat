@@ -258,7 +258,14 @@ export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
         <div className="fixed inset-0 z-50 bg-background flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between px-8 py-4 border-b border-border bg-card">
-                <span className="text-lg font-semibold text-primary">Allocat</span>
+                <div className="flex items-center gap-2.5">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 border border-primary/25">
+                        <span className="text-sm leading-none">🐱</span>
+                    </div>
+                    <span className="font-display text-lg font-bold tracking-tight text-foreground">
+                        allo<span className="text-primary">cat</span>
+                    </span>
+                </div>
                 <button
                     onClick={onSkip}
                     className="text-sm text-muted-foreground hover:text-foreground underline underline-offset-2"
@@ -345,7 +352,7 @@ export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
                                     </div>
                                 </div>
                                 {accountError && (
-                                    <p className="text-sm text-red-600">{accountError}</p>
+                                    <p className="text-sm text-destructive">{accountError}</p>
                                 )}
                                 <Button
                                     onClick={handleAddAccount}
@@ -377,7 +384,7 @@ export function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
                                                 </span>
                                                 <button
                                                     onClick={() => handleRemoveAccount(a.id)}
-                                                    className="text-gray-400 hover:text-red-500"
+                                                    className="text-muted-foreground hover:text-destructive"
                                                     aria-label="Remove account"
                                                 >
                                                     <Trash2 className="w-4 h-4" />

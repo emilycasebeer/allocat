@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
             } else {
                 const { data: newGroup, error: groupError } = await supabase
                     .from('category_groups')
-                    .insert({ user_id: user.id, name: groupName, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+                    .insert({ user_id: user.id, name: groupName, sort_order: 9999, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
                     .select('id')
                     .single()
                 if (groupError || !newGroup) {
@@ -167,26 +167,25 @@ export async function POST(request: NextRequest) {
                 .update({ payment_category_id: paymentCategoryId, updated_at: new Date().toISOString() })
                 .eq('id', account.id)
 
-            // Seed a $0 allocation in the current month's budget if one exists
-            const now = new Date()
-            const { data: currentBudget } = await supabase
+            // Seed $0 allocations across all existing budget months (matches POST /api/categories backfill behavior)
+            const { data: allBudgets } = await supabase
                 .from('budgets')
                 .select('id')
                 .eq('user_id', user.id)
-                .eq('month', now.getMonth() + 1)
-                .eq('year', now.getFullYear())
-                .maybeSingle()
 
-            if (currentBudget) {
+            if (allBudgets && allBudgets.length > 0) {
                 await supabase
                     .from('category_allocations')
-                    .upsert({
-                        budget_id: currentBudget.id,
-                        category_id: paymentCategoryId,
-                        budgeted_amount: 0,
-                        created_at: new Date().toISOString(),
-                        updated_at: new Date().toISOString(),
-                    }, { onConflict: 'budget_id,category_id' })
+                    .upsert(
+                        allBudgets.map(b => ({
+                            budget_id: b.id,
+                            category_id: paymentCategoryId,
+                            budgeted_amount: 0,
+                            created_at: new Date().toISOString(),
+                            updated_at: new Date().toISOString(),
+                        })),
+                        { onConflict: 'budget_id,category_id' }
+                    )
             }
         }
 
